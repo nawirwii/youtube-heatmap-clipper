@@ -360,6 +360,30 @@ select.input {
   align-items: center;
 }
 
+.segSource {
+  margin-top: 6px;
+  padding: 7px 10px;
+  border: 1px solid rgba(124, 58, 237, .45);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: rgba(124, 58, 237, .10);
+  color: rgba(255, 255, 255, .78);
+  font-size: 12px;
+  line-height: 1.45;
+  max-width: 560px;
+}
+
+.segSource.fallback {
+  border-color: rgba(245, 158, 11, .5);
+  background: rgba(245, 158, 11, .10);
+  color: rgba(253, 230, 170, .92);
+}
+
+.pill.noScore {
+  border-color: rgba(245, 158, 11, .5);
+  color: rgba(253, 230, 170, .9);
+}
+
 .panelTitle {
   font-weight: 700;
 }

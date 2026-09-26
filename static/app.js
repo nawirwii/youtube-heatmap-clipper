@@ -54,6 +54,13 @@ const I18N = {
     "js.modal.preview_segment": "Preview Segment",
     "js.modal.preview_clip": "Preview Clip",
     "js.segments.empty": "Belum ada segment. Klik Scan Heatmap dulu.",
+    "js.segments.empty.scanned": "Scan sudah dijalankan tapi tidak ada segment. Coba lagi, atau pakai mode Custom start/end.",
+    "js.seg.score.title": "Skor intensitas heatmap",
+    "js.seg.score.none": "Tanpa skor heatmap (fallback)",
+    "js.src.heatmap": "Sumber: Most Replayed YouTube ({markers} titik heatmap, {count} momen).",
+    "js.src.fallback": "Sumber: fallback. {reason} Segment di bawah dibuat berjarak rata dari durasi video, bukan dari heatmap.",
+    "js.src.fallback.short": "Fallback",
+    "js.src.heatmap.short": "Most Replayed",
     "js.preview.loading": "Loading preview…",
     "js.progress.count": "{done}/{total} selesai • {success} sukses",
     "js.selected.count": "{count} dipilih",
@@ -121,6 +128,13 @@ const I18N = {
     "js.modal.preview_segment": "Preview Segment",
     "js.modal.preview_clip": "Preview Clip",
     "js.segments.empty": "No segments yet. Click Scan Heatmap first.",
+    "js.segments.empty.scanned": "Scan ran but produced no segments. Try again, or use Custom start/end mode.",
+    "js.seg.score.title": "Heatmap intensity score",
+    "js.seg.score.none": "No heatmap score (fallback)",
+    "js.src.heatmap": "Source: YouTube Most Replayed ({markers} heatmap points, {count} moments).",
+    "js.src.fallback": "Source: fallback. {reason} The segments below are evenly spaced across the video, not heatmap based.",
+    "js.src.fallback.short": "Fallback",
+    "js.src.heatmap.short": "Most Replayed",
     "js.preview.loading": "Loading preview…",
     "js.progress.count": "{done}/{total} done • {success} success",
     "js.selected.count": "{count} selected",
@@ -442,11 +456,12 @@ async function clipSelected() {
   }
 }
 
-function renderSegments(segments) {
+function renderSegments(segments, scanned) {
   const root = $("segments");
   root.innerHTML = "";
   if (!segments || segments.length === 0) {
-    root.innerHTML = `<div class="small">${t("js.segments.empty")}</div>`;
+    const key = scanned ? "js.segments.empty.scanned" : "js.segments.empty";
+    root.innerHTML = `<div class="small">${t(key)}</div>`;
     updateSelectedUi();
     return;
   }
@@ -470,7 +485,7 @@ function renderSegments(segments) {
         <div class="m">durasi ${Math.round(dur)}s</div>
       </div>
       <div class="segSide">
-        <div class="pill">${score.toFixed(2)}</div>
+        <div class="pill${score > 0 ? "" : " noScore"}" title="${score > 0 ? t("js.seg.score.title") : t("js.seg.score.none")}">${score > 0 ? score.toFixed(2) : "\u2014"}</div>
         <button class="btn ghost smallBtn" type="button" data-preview="1">Preview</button>
       </div>
     `;
@@ -561,19 +576,45 @@ let currentPreview = null;
 let currentVideoId = "";
 let selectedKeys = new Set();
 
+function renderScanSource(data, count) {
+  const box = $("segSource");
+  if (!box) return;
+  const source = (data && data.source) || "";
+  if (!source || source === "none" || !count) {
+    box.classList.add("hide");
+    box.textContent = "";
+    return;
+  }
+  if (source === "heatmap") {
+    box.textContent = t("js.src.heatmap", {
+      markers: Number(data.markers || 0),
+      count,
+    });
+    box.classList.remove("fallback");
+  } else {
+    box.textContent = t("js.src.fallback", {
+      reason: (data && data.detail) || "",
+    });
+    box.classList.add("fallback");
+  }
+  box.classList.remove("hide");
+}
+
 async function scan() {
   setBusy(true);
   try {
-    const { url } = readPayload();
-    const data = await postJson("/api/scan", { url });
+    const { url, max_clips } = readPayload();
+    const data = await postJson("/api/scan", { url, max_clips });
     lastScanSegments = data.segments || [];
     selectedKeys = new Set();
     currentVideoId = data.video_id || currentVideoId;
     $("segMeta").textContent = `${lastScanSegments.length} segments • durasi ~${fmtTime(data.duration || 0)}`;
-    renderSegments(lastScanSegments);
+    renderScanSource(data, lastScanSegments.length);
+    renderSegments(lastScanSegments, true);
   } catch (e) {
     $("segMeta").textContent = e.message;
-    renderSegments([]);
+    renderScanSource(null, 0);
+    renderSegments([], true);
   } finally {
     setBusy(false);
     updateSelectedUi();

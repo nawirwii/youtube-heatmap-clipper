@@ -148,7 +148,7 @@ def run_job(job_id, payload):
         if not video_id:
             raise ValueError("URL YouTube invalid")
 
-        total_duration = core.get_duration(video_id)
+        total_duration = core.ambil_durasi(video_id)
 
         targets = []
         picked = payload.get("segments")
@@ -176,10 +176,32 @@ def run_job(job_id, payload):
             targets = [{"start": float(start_s), "duration": float(end_s - start_s), "score": 1.0}]
         else:
             add_log(job_id, "Scan heatmap...")
-            segments = core.ambil_most_replayed(video_id)
-            if not segments:
-                raise RuntimeError("Tidak ada heatmap/Most Replayed data")
-            targets = segments[: max(1, max_clips or 10)]
+            hasil_scan = core.scan_heatmap(video_id)
+            if not total_duration:
+                total_duration = hasil_scan.get("duration") or 0
+            targets = hasil_scan["segments"]
+            if not targets:
+                # Jangan berhenti di sini: kalau heatmap memang tidak ada, pakai
+                # titik potong berjarak rata. Yang benar-benar fatal hanya kalau
+                # YouTube tidak bisa diakses sama sekali.
+                if hasil_scan["reason"] in ("network", "consent", "notfound"):
+                    add_log(job_id, f"Heatmap gagal dibaca: {hasil_scan['detail']}")
+                    raise RuntimeError(hasil_scan["detail"])
+                add_log(job_id, f"Heatmap tidak tersedia: {hasil_scan['detail']}")
+                targets = core.fallback_segments(
+                    total_duration, count=max(1, max_clips or 5)
+                )
+                add_log(
+                    job_id,
+                    f"Fallback: {len(targets)} segment berjarak rata dari "
+                    f"{total_duration}s video.",
+                )
+            targets = targets[: max(1, max_clips or 10)]
+
+        if total_duration <= 0:
+            raise ValueError(
+                "Durasi video tidak terbaca. Cek link-nya, lalu coba lagi."
+            )
 
         set_job(job_id, total=len(targets), done=0, status_text="processing")
 
@@ -276,9 +298,53 @@ def api_scan():
     if not ok:
         return jsonify({"ok": False, "error": "FFmpeg tidak ketemu"}), 400
 
-    segments = core.ambil_most_replayed(video_id)
-    total = core.get_duration(video_id)
-    return jsonify({"ok": True, "video_id": video_id, "duration": total, "segments": segments})
+    max_clips = safe_int(data.get("max_clips"), 0)
+
+    hasil = core.scan_heatmap(video_id)
+
+    # Durasi dari HTML yang sudah kita ambil bersifat instan dan tidak kena
+    # rate limit. yt-dlp hanya dipakai kalau angka itu tidak ada.
+    total = hasil.get("duration") or core.ambil_durasi(video_id)
+
+    segments = hasil["segments"]
+    source = "heatmap"
+    reason = hasil["reason"]
+    detail = hasil["detail"]
+
+    if not segments:
+        # Gagal jaringan/consent tidak bisa ditutup dengan tebakan: user harus
+        # tahu itu masalah akses, bukan emang videonya tidak panas.
+        if reason in ("network", "consent", "notfound"):
+            return jsonify({
+                "ok": False,
+                "video_id": video_id,
+                "error": detail,
+                "reason": reason,
+            }), 502
+
+        segments = core.fallback_segments(total, count=max(1, int(max_clips or 5)))
+        source = "fallback"
+        if not segments:
+            return jsonify({
+                "ok": False,
+                "video_id": video_id,
+                "error": (
+                    "Tidak ada data heatmap dan durasi videonya tidak terbaca, "
+                    "jadi tidak ada titik potong yang bisa dihitung."
+                ),
+                "reason": reason,
+            }), 422
+
+    return jsonify({
+        "ok": True,
+        "video_id": video_id,
+        "duration": total,
+        "segments": segments,
+        "source": source,
+        "reason": reason,
+        "detail": detail,
+        "markers": hasil["markers"],
+    })
 
 
 @app.post("/api/clip")

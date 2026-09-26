@@ -255,62 +255,319 @@ def cek_dependensi(install_whisper=False, fatal=True):
     return True
 
 
-def ambil_most_replayed(video_id):
+WATCH_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
+
+
+PLAYABILITY_GAGAL = (
+    "ERROR",
+    "UNPLAYABLE",
+    "LOGIN_REQUIRED",
+    "AGE_VERIFICATION_REQUIRED",
+    "AGE_CHECK_REQUIRED",
+    "CONTENT_CHECK_REQUIRED",
+    "AGE_RESTRICTED",
+)
+
+
+def _status_playability(html):
+    """Baca playabilityStatus.status dari HTML halaman tontonan."""
+    m = re.search(r'"playabilityStatus":\{"status":"([A-Z_]+)"', html or "")
+    return m.group(1) if m else ""
+
+
+def durasi_dari_html(html):
     """
-    Fetch and parse YouTube 'Most Replayed' heatmap data.
-    Returns a list of high-engagement segments.
+    Ambil durasi video dari videoDetails.lengthSeconds.
+
+    Number ini selalu ada kalau video bisa diputar, dan nilainya sama dengan
+    yang dikembalikan yt-dlp -- tapi kita sudah memegang HTML-nya, jadi tidak
+    perlu request kedua (dan tidak kena rate limit YouTube).
+    """
+    m = re.search(r'"lengthSeconds":"(\d+)"', html or "")
+    if not m:
+        return 0
+    try:
+        return int(m.group(1))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _ambil_html_watch(video_id, timeout=20):
+    """
+    Ambil HTML halaman tontonan.
+    Return (html, error) dengan error: None | 'network' | 'consent' | 'notfound'.
     """
     url = f"https://www.youtube.com/watch?v={video_id}"
-    headers = {"User-Agent": "Mozilla/5.0"}
-
-    print("Reading YouTube heatmap data...")
-
-    try:
-        html = requests.get(url, headers=headers, timeout=20).text
-    except Exception:
-        return []
-
-    match = re.search(
-        r'"markers":\s*(\[.*?\])\s*,\s*"?markersMetadata"?',
-        html,
-        re.DOTALL
-    )
-
-    if not match:
-        return []
+    headers = {
+        "User-Agent": WATCH_UA,
+        "Accept-Language": "en-US,en;q=0.9,id;q=0.8",
+        "Accept": "text/html,application/xhtml+xml",
+    }
 
     try:
-        markers = json.loads(match.group(1).replace('\\"', '"'))
+        res = requests.get(url, headers=headers, timeout=timeout)
     except Exception:
-        return []
+        return None, "network"
 
-    results = []
+    html = res.text or ""
 
-    for marker in markers:
-        if "heatMarkerRenderer" in marker:
-            marker = marker["heatMarkerRenderer"]
+    if res.status_code == 404:
+        return html, "notfound"
 
-        try:
-            score = float(marker.get("intensityScoreNormalized", 0))
-            if score >= MIN_SCORE:
-                results.append({
-                    "start": float(marker["startMillis"]) / 1000,
-                    "duration": min(
-                        float(marker["durationMillis"]) / 1000,
-                        MAX_DURATION
-                    ),
-                    "score": score
-                })
-        except Exception:
-            continue
+    status = _status_playability(html)
 
-    results.sort(key=lambda x: x["score"], reverse=True)
-    return results
+    # Penting: jangan searching teks "Video unavailable" di HTML. String itu
+    # bagian dari tabel terjemahan YouTube yang ada di SETIAP halaman, termasuk
+    # video yang sehat. Satu-satunya sinyal yang bisa dipercaya adalah
+    # playabilityStatus.
+    if status in PLAYABILITY_GAGAL:
+        return html, "notfound"
+
+    # Halaman interstitial persetujuan / verifikasi bot tidak pernah memuat
+    # data player, jadi mustahil ada heatmap di dalamnya.
+    if "consent.youtube.com" in html or "Sign in to confirm" in html:
+        return html, "consent"
+    if "ytInitialPlayerResponse" not in html:
+        return html, "consent"
+
+    return html, None
 
 
-def get_duration(video_id):
+def _cari_array_markers(html):
     """
-    Retrieve the total duration of a YouTube video in seconds.
+    Ekstrak array "markers" dari HTML dengan pemindaian kurung seimbang.
+
+    Regex lama ('"markers":[...],"markersMetadata"') rapuh: begitu YouTube
+    mengganti nama key tetangga, match gagal dan hasilnya kosong tanpa alasan.
+    Versi ini tidak peduli key apa yang mengikuti array.
+    """
+    awal = html.find('"markers"')
+    if awal < 0:
+        return None
+
+    # Lompat ke tanda '[' pertama sesudah "markers"
+    i = html.find("[", awal)
+    if i < 0:
+        return None
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for j in range(i, min(len(html), i + 400000)):
+        c = html[j]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif c == "\\":
+                escaped = True
+            elif c == '"':
+                in_string = False
+            continue
+        if c == '"':
+            in_string = True
+        elif c == "[":
+            depth += 1
+        elif c == "]":
+            depth -= 1
+            if depth == 0:
+                return html[i:j + 1]
+
+    return None
+
+
+def _marker_ke_segment(marker, threshold):
+    """Konversi satu marker heatmap jadi dict segment, atau None."""
+    if not isinstance(marker, dict):
+        return None
+    if "heatMarkerRenderer" in marker and isinstance(marker["heatMarkerRenderer"], dict):
+        marker = marker["heatMarkerRenderer"]
+
+    try:
+        score = float(marker.get("intensityScoreNormalized", 0))
+        start = float(marker["startMillis"]) / 1000
+        dur = float(marker.get("durationMillis", 0)) / 1000
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    if score < threshold:
+        return None
+    if dur <= 0:
+        dur = 2.0
+
+    return {
+        "start": start,
+        "duration": min(dur, MAX_DURATION),
+        "score": score,
+    }
+
+
+def gabung_marker(markers, threshold=MIN_SCORE, min_gap=0.0):
+    """
+    Gabungkan marker yang bersebelahan jadi momen utuh.
+
+    YouTube memecah heatmap jadi ~100 keranjjang 2 detik. Kalau tiap keranjjang
+    dipotong sendiri, hasilnya 10 clip yang isinya nyaris sama. Menggabungkan
+    rentang yang skor tinggi-nya nyambung jadi momen yang benar-benar terpisah.
+    """
+    terfilter = [
+        m for m in (_marker_ke_segment(x, threshold) for x in markers) if m
+    ]
+    terfilter.sort(key=lambda x: x["start"])
+    if not terfilter:
+        return []
+
+    hasil = []
+    berjalan = dict(terfilter[0])
+    for m in terfilter[1:]:
+        # Sentuh / nyambung dengan momen sebelumnya?
+        if m["start"] <= berjalan["start"] + berjalan["duration"] + min_gap:
+            ujung = m["start"] + m["duration"]
+            if ujung > berjalan["start"] + berjalan["duration"]:
+                berjalan["duration"] = min(
+                    ujung - berjalan["start"], MAX_DURATION
+                )
+            berjalan["score"] = max(berjalan["score"], m["score"])
+        else:
+            hasil.append(berjalan)
+            berjalan = dict(m)
+    hasil.append(berjalan)
+
+    hasil.sort(key=lambda x: x["score"], reverse=True)
+    return hasil
+
+
+def scan_heatmap(video_id, timeout=20):
+    """
+    Ambil data 'Most Replayed' plus alasan kalau gagal.
+
+    Return dict:
+      ok        -> bool
+      source    -> 'heatmap' | 'fallback'
+      reason    -> kode singkat untuk ditampilkan ke user
+      detail    -> penjelasan human-readable
+      segments  -> list segment
+      markers   -> jumlah marker mentah yang dibaca YouTube (0 = tidak ada)
+    """
+    html, error = _ambil_html_watch(video_id, timeout=timeout)
+    durasi = durasi_dari_html(html or "")
+
+    if error == "network":
+        return {
+            "ok": False, "source": "none", "reason": "network",
+            "detail": "Tidak bisa menghubungi YouTube. Cek koneksi internet.",
+            "segments": [], "markers": 0, "duration": durasi,
+        }
+    if error == "consent":
+        return {
+            "ok": False, "source": "none", "reason": "consent",
+            "detail": (
+                "YouTube meminta verifikasi sebelum menampilkan halaman "
+                "(consent/bot check). Buka link videonya di browser, "
+                "selesai verifikasinya, lalu scan ulang."
+            ),
+            "segments": [], "markers": 0, "duration": durasi,
+        }
+    if error == "notfound":
+        return {
+            "ok": False, "source": "none", "reason": "notfound",
+            "detail": "Video tidak ditemukan atau tidak bisa diakses.",
+            "segments": [], "markers": 0, "duration": durasi,
+        }
+
+    blok = _cari_array_markers(html or "")
+    if not blok:
+        return {
+            "ok": False, "source": "none", "reason": "no_heatmap",
+            "detail": (
+                "YouTube tidak menyediakan data Most Replayed untuk video ini "
+                "(biasanya video pendek, baru diunggah, atau viewersnya masih sedikit)."
+            ),
+            "segments": [], "markers": 0, "duration": durasi,
+        }
+
+    try:
+        markers = json.loads(blok)
+    except Exception:
+        return {
+            "ok": False, "source": "none", "reason": "parse",
+            "detail": "Data heatmap tidak bisa dibaca (format YouTube berubah).",
+            "segments": [], "markers": 0, "duration": durasi,
+        }
+
+    if not isinstance(markers, list):
+        markers = []
+
+    segments = gabung_marker(markers)
+
+    if not segments:
+        return {
+            "ok": False, "source": "none", "reason": "below_threshold",
+            "detail": (
+                f"Heatmap terbaca ({len(markers)} titik) tapi tidak ada satu "
+                f"pun yang melewati ambang MIN_SCORE {MIN_SCORE}."
+            ),
+            "segments": [], "markers": len(markers), "duration": durasi,
+        }
+
+    return {
+        "ok": True, "source": "heatmap", "reason": "",
+        "detail": "",
+        "segments": segments, "markers": len(markers), "duration": durasi,
+    }
+
+
+def ambil_most_replayed(video_id, timeout=20):
+    """
+    Backward compatible: kembalikan list segment saja.
+    """
+    return scan_heatmap(video_id, timeout=timeout)["segments"]
+
+
+def fallback_segments(total_duration, count=5):
+    """
+    Susun segment berjarak merata untuk video tanpa data heatmap.
+
+    Dipakai supaya tool tetap menghasilkan clip, bukan keluar kosong.
+    Semua segment diberi score 0.0 supaya UI bisa menandai asal-usulnya.
+    """
+    durasi = float(total_duration or 0)
+    if durasi <= 0:
+        return []
+
+    # Jeda antar potongan supaya tidak saling tumpang tindih.
+    jeda = 5.0
+    # Setiap potongan harus dapat minimal 30 detik (termasuk jeda), kalau tidak
+    # video pendek berubah jadi potongan yang tumpang tindih.
+    n = max(1, min(int(count), int(durasi // 30)))
+
+    if n == 1:
+        return [{"start": 0.0, "duration": round(durasi, 2), "score": 0.0}]
+
+    slot = durasi / n
+    panjang = min(MAX_DURATION, slot - jeda)
+
+    hasil = []
+    for i in range(n):
+        start = i * slot
+        hasil.append({
+            "start": round(start, 2),
+            "duration": round(min(panjang, durasi - start), 2),
+            "score": 0.0,
+        })
+    return hasil
+
+
+def get_duration(video_id, fallback=0):
+    """
+    Retrieve the total duration of a video in seconds.
+
+    Default lama adalah 3600, yang diam-diam menghasilkan titik potong salah
+    setiap kali yt-dlp gagal (kena rate limit, tanpa JS runtime, video privat).
+    Sekarang mengembalikan `fallback` (default 0) supaya pemanggil bisa
+    bereaksi, bukan memotong clip 60 menit dari video 20 detik.
     """
     cmd = [
         *ytdlp_cmd(),
@@ -319,21 +576,47 @@ def get_duration(video_id):
     ]
 
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True)
-        time_parts = res.stdout.strip().split(":")
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+        out = (res.stdout or "").strip()
 
-        if len(time_parts) == 2:
-            return int(time_parts[0]) * 60 + int(time_parts[1])
-        if len(time_parts) == 3:
-            return (
-                int(time_parts[0]) * 3600 +
-                int(time_parts[1]) * 60 +
-                int(time_parts[2])
-            )
+        # yt-dlp kadang menulis durasi dengan desimal ("252.0") atau menambah
+        # baris lain ke stdout, jadi ambil baris terakhir yang terbaca durasi.
+        for baris in reversed(out.splitlines()):
+            baris = baris.strip()
+            if not baris or baris.startswith("ERROR") or baris.startswith("WARNING"):
+                continue
+            try:
+                return int(float(baris))
+            except ValueError:
+                time_parts = baris.split(":")
+                if len(time_parts) in (2, 3):
+                    try:
+                        detik = [int(float(x)) for x in time_parts]
+                    except ValueError:
+                        continue
+                    if len(detik) == 2:
+                        return detik[0] * 60 + detik[1]
+                    return detik[0] * 3600 + detik[1] * 60 + detik[2]
     except Exception:
         pass
 
-    return 3600
+    return fallback
+
+
+def ambil_durasi(video_id):
+    """
+    Durasi video, andalkan sumber paling murah dulu.
+
+    yt-dlp lebih akurat untuk Shorts/live, tapi sering kena rate limit kalau
+    dipanggil terus-menerus. Karena itu HTML dipakai sebagai cadangan, dan
+    angka lengthSeconds di sana selalu ada untuk video yang bisa diputar.
+    """
+    dur = get_duration(video_id)
+    if dur > 0:
+        return dur
+
+    html, _err = _ambil_html_watch(video_id)
+    return durasi_dari_html(html or "")
 
 
 def generate_subtitle(video_file, subtitle_file, event_hook=None):
@@ -788,15 +1071,32 @@ def main():
         print("Invalid YouTube link.")
         return
 
-    heatmap_data = ambil_most_replayed(video_id)
-
-    if not heatmap_data:
-        print("No high-engagement segments found.")
-        return
-
-    print(f"Found {len(heatmap_data)} high-engagement segments.")
-
+    print("Reading YouTube heatmap data...")
+    hasil = scan_heatmap(video_id)
+    heatmap_data = hasil["segments"]
     total_duration = get_duration(video_id)
+
+    if heatmap_data:
+        print(
+            f"Found {len(heatmap_data)} high-engagement moment(s) "
+            f"from {hasil['markers']} heatmap marker(s)."
+        )
+    else:
+        # Tidak berhenti di sini: video pendek/baru tidak punya Most Replayed,
+        # tapi user tetap harusnya bisa dapat clip dari video itu.
+        if hasil["reason"] in ("network", "consent", "notfound"):
+            print(f"Heatmap gagal dibaca: {hasil['detail']}")
+            return
+        print(f"Heatmap tidak tersedia: {hasil['detail']}")
+        heatmap_data = fallback_segments(total_duration, count=MAX_CLIPS)
+        if not heatmap_data:
+            print("Tidak bisa menentukan durasi video, tidak ada clip yang bisa dibuat.")
+            return
+        print(
+            f"Fallback: {len(heatmap_data)} equally spaced segment(s) "
+            f"dari {total_duration}s video."
+        )
+
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     print(
