@@ -23,6 +23,11 @@ on:
         description: "Versi untuk asset (kosongkan = pakai file VERSION)"
         required: false
         type: string
+      dry_run:
+        description: "Hanya build + tulis draft release notes, jangan sentuh GitHub Release"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -100,11 +105,12 @@ jobs:
           retention-days: 30
 
       - name: Publish ke GitHub Release
-        if: steps.ver.outputs.is_tag == 'true'
+        if: steps.ver.outputs.is_tag == 'true' || inputs.dry_run == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: v${{ steps.ver.outputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           $assets = @(
             "build-portable/YoutubeHeatmapClipper_v${{ steps.ver.outputs.version }}_x64_portable.zip",
@@ -112,9 +118,73 @@ jobs:
           )
           foreach ($a in $assets) { if (-not (Test-Path $a)) { throw "Asset hilang: $a" } }
 
+          # Body release yang informatif: ukuran, checksum, isi paket, gate build.
+          $zip = $assets[0]
+          $zipItem = Get-Item $zip
+          $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $mib = [math]::Round($zipItem.Length / 1MB, 1)
+          $notes = @(
+            "## Paket Portable Windows x64",
+            "",
+            "Ekstrak zip, lalu **double-click ``YoutubeHeatmapClipper.exe``**. Tidak perlu install Python, FFmpeg, maupun yt-dlp - semuanya sudah di dalam paket.",
+            "",
+            "**Ukuran:** $mib MiB ($($zipItem.Length.ToString('N0')) byte)",
+            "**SHA256:** ``$sha``",
+            "",
+            "Cek checksum sebelum dipakai:",
+            "",
+            '```bash',
+            "sha256sum -c $(Split-Path -Leaf $zip).sha256",
+            '```',
+            "",
+            "### Isi paket",
+            "",
+            "| Komponen | Keterangan |",
+            "|---|---|",
+            "| Python runtime | 3.11, dibundel di ``_internal/`` |",
+            "| Flask | server web lokal |",
+            "| ffmpeg / ffprobe | build win64 dari paket, bukan dari PATH sistem |",
+            "| yt-dlp | exe mandiri, bisa ditukar manual |",
+            "| faster-whisper | subtitle otomatis (model diunduh sekali saat dipakai) |",
+            "| Font | 92 file, Roboto + Roboto Mono |",
+            "",
+            "### Cara pakai",
+            "",
+            "1. Ekstrak **seluruh folder** (``_internal/`` wajib ikut).",
+            "2. Jalankan ``YoutubeHeatmapClipper.exe``.",
+            "3. Browser terbuka otomatis ke ``http://127.0.0.1:5000``. Kalau port 5000 bentrok, aplikasi cari port kosong berikutnya dan mencetak URL-nya di jendela konsol.",
+            "4. Hasil clip tersimpan di ``clips\`` sebelah ``exe``.",
+            "",
+            "### Opsi exe",
+            "",
+            "- ``--port 5050`` - paksa port tertentu",
+            "- ``--no-browser`` - jangan buka browser otomatis",
+            "- ``--url <link>`` / ``--check`` - mode CLI",
+            "- ``--self-test`` - cek kelengkapan paket lalu keluar",
+            "- ``--version`` - cetak versi",
+            "",
+            "Diekstrak ke folder read-only (mis. ``C:\Program Files``) membuat output otomatis dialihkan ke ``%LOCALAPPDATA%\YoutubeHeatmapClipper\``.",
+            "",
+            "### Gate build",
+            "",
+            "Zip ini hanya terbit kalau tiga gate hijau, bukan cuma build sukses:",
+            "",
+            "1. ``YoutubeHeatmapClipper.exe --self-test --require-whisper`` - semua cek lulus",
+            "2. Smoke test HTTP ke server yang dijalankan dari paket - ``/``, ``/static/app.js``, font, dan route 404",
+            "3. ``verify_portable.py`` membaca nama file di dalam zip dan demanding 12 file wajib"
+          ) -join "`n"
+          [System.IO.File]::WriteAllText("$env:RUNNER_TEMP\notes.md", $notes, (New-Object System.Text.UTF8Encoding $false))
+
+          if ($env:DRY_RUN -eq "true") {
+            Write-Host "==> DRY RUN: GitHub Release tidak disentuh. Isi draft notes:"
+            Get-Content "$env:RUNNER_TEMP\notes.md"
+            exit 0
+          }
+
           # Pola idempotent: hapus release lama, buat ulang, lalu upload.
           gh release delete $env:TAG --yes --cleanup-tag 2>$null
           gh release create $env:TAG @assets `
             --title "YouTube Heatmap Clipper v${{ steps.ver.outputs.version }} (portable Windows x64)" `
+            --notes-file "$env:RUNNER_TEMP\notes.md" `
             --generate-notes
           gh release view $env:TAG --json assets --jq ".assets[].name"

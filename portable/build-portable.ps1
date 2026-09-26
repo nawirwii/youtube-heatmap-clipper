@@ -148,7 +148,10 @@ if (-not $NoWhisper) { $verifyArgs += "--expect-whisper" }
 & python @verifyArgs
 if ($LASTEXITCODE -ne 0) { throw "verifikasi zip GAGAL (exit $LASTEXITCODE)" }
 
-$sha | Set-Content -Path "$zipPath.sha256" -Encoding ASCII
+# Format standar sha256sum: "<hash>  <nama file>" dengan akhiran LF.
+# Set-Content di Windows menulis CRLF, itu bikin `sha256sum -c` gagal di Linux/WSL.
+$shaLine = "{0}  {1}`n" -f $sha.ToLowerInvariant(), $zipItem.Name
+[System.IO.File]::WriteAllText("$zipPath.sha256", $shaLine, (New-Object System.Text.UTF8Encoding $false))
 Info "checksum ditulis: $(Split-Path -Leaf $zipPath).sha256"
 
 Step "Selesai"
