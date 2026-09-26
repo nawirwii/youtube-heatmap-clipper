@@ -105,7 +105,10 @@ jobs:
           retention-days: 30
 
       - name: Publish ke GitHub Release
-        if: steps.ver.outputs.is_tag == 'true' || inputs.dry_run == 'true'
+        # PENTING: inputs.dry_run bertipe boolean, jadi HARUS dibandingkan
+        # dengan boolean. `== 'true'` selalu false karena GitHub menyamakan
+        # tipe: boolean -> 1, string 'true' -> NaN.
+        if: steps.ver.outputs.is_tag == 'true' || inputs.dry_run == true
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
