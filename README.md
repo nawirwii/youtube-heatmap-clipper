@@ -60,6 +60,65 @@ Ini versi web dari proyek original: https://github.com/0xACAB666/yt-heatmap-clip
 - Internet connection
 - Optional: `faster-whisper` (kalau subtitle ON)
 
+## 🪟 Paket Portable Windows (tanpa install apa pun)
+
+Situasi: mau pakai di komputer lain / flashdisk / warnet, tanpa install
+Python, tanpa install FFmpeg, tanpa install yt-dlp.
+
+Unduh `YoutubeHeatmapClipper_v<versi>_x64_portable.zip` dari
+[Releases](https://github.com/nawirwii/youtube-heatmap-clipper/releases/latest),
+ekstrak, lalu double-click `YoutubeHeatmapClipper.exe`.
+
+Isi paket:
+
+| Komponen | Status |
+| --- | --- |
+| Python 3.11 + Flask | ikut, tidak perlu install |
+| ffmpeg + ffprobe | ikut, tidak perlu install |
+| yt-dlp.exe | ikut, tidak perlu install |
+| 92 file font | ikut, untuk burn subtitle |
+| faster-whisper | ikut, model diunduh sekali saat dipakai |
+
+Detail penggunaan + trouble shooting: `portable/README-PORTABLE.txt`
+(udah ikut di dalam zip).
+
+Opsi lain dari exe yang sama:
+
+```powershell
+YoutubeHeatmapClipper.exe --port 5050        # ganti port
+YoutubeHeatmapClipper.exe --no-browser       # jangan buka browser
+YoutubeHeatmapClipper.exe --self-test        # cek kelengkapan paket
+YoutubeHeatmapClipper.exe --url "https://www.youtube.com/watch?v=ID" --crop split_left
+```
+
+Output clip ditulis ke folder `clips/` di dalam paket, jadi seluruh folder bisa
+dibawa kemana-mana. Kalau folder aplikasi tidak writable (mis. diekstrak ke
+`C:\Program Files`), output dipindah ke
+`%LOCALAPPDATA%\YoutubeHeatmapClipper\`.
+
+### Build sendiri (developer)
+
+Build selalu lewat GitHub Actions (`pwsh portable/build-portable.ps1`), tidak
+perlu mesin Windows lokal. Urutannya:
+
+```text
+portable/fetch-deps.ps1      -> unduh ffmpeg/ffprobe/yt-dlp ke bin/
+portable/yhc.spec            -> PyInstaller onedir
+portable/build-portable.ps1  -> build + exe --self-test + zip + verifikasi isi zip
+portable/verify_portable.py  -> cek NAMA FILE di dalam zip (bukan cuma "build hijau")
+portable/smoke-portable.ps1  -> nyalakan exe-nya, pastikan UI benar-benar tersaji
+```
+
+Manual di Windows:
+
+```powershell
+pwsh portable/build-portable.ps1 -Version 2.0.47
+pwsh portable/build-portable.ps1 -Version 2.0.47 -NoWhisper   # paket lebih kecil, tanpa subtitle AI
+```
+
+Catatan: `bin/` tidak di-commit (ffmpeg ~80 MB, yt-dlp ~13 MB), selalu
+ditarik ulang oleh `fetch-deps.ps1`.
+
 ## Cara Pakai (Paling Gampang)
 
 Cukup double-click file **`start.bat`**.

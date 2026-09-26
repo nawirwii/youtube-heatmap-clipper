@@ -8,6 +8,7 @@ import shutil
 from urllib.parse import urlparse, parse_qs
 import argparse
 import warnings
+from portable_runtime import IS_FROZEN, tool, ytdlp_cmd
 warnings.filterwarnings("ignore")
 
 OUTPUT_DIR = "clips"      # Directory where generated clips will be saved
@@ -45,7 +46,15 @@ def set_ratio_preset(preset):
         return
     raise ValueError("Invalid ratio preset")
 
+def ffmpeg_bin():
+    """Path ffmpeg: pakai yang bundled di bin/ kalau ada, else PATH."""
+    return tool("ffmpeg")
+
+
 def ffmpeg_tersedia():
+    candidate = ffmpeg_bin()
+    if os.path.isabs(candidate) and os.path.isfile(candidate):
+        return True
     return bool(shutil.which("ffmpeg"))
 
 
@@ -186,7 +195,9 @@ def cek_dependensi(install_whisper=False, fatal=True):
     args = getattr(cek_dependensi, "_args", None)
     skip_update = bool(getattr(args, "no_update_ytdlp", False)) if args else False
 
-    if not skip_update:
+    if not skip_update and not IS_FROZEN:
+        # Paket portable tidak punya pip; yt-dlp-nya adalah bin/yt-dlp.exe
+        # dan bisa di-upgrade user dengan menukar file itu.
         subprocess.run(
             [sys.executable, "-m", "pip", "install", "-U", "yt-dlp"],
             stdout=subprocess.DEVNULL,
@@ -200,7 +211,7 @@ def cek_dependensi(install_whisper=False, fatal=True):
             print(f"✅ Faster-Whisper package installed.")
             
             # Check if selected model is cached
-            cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
+            cache_dir = os.environ.get("HF_HOME") or os.path.expanduser("~/.cache/huggingface")
             model_name = f"faster-whisper-{WHISPER_MODEL}"
             
             model_cached = False
@@ -219,6 +230,13 @@ def cek_dependensi(install_whisper=False, fatal=True):
                 print(f"   ⏱️  Download happens only once, then cached for future use.\n")
                 
         except ImportError:
+            if IS_FROZEN:
+                print("⚠️  Faster-Whisper tidak ada di paket portable ini.")
+                print("    Paket ini dibuat tanpa fitur subtitle AI.")
+                print("    Jalankan tanpa subtitle, atau rebuild paket dengan subtitle.")
+                if fatal:
+                    sys.exit(1)
+                return False
             print("📦 Installing Faster-Whisper package...")
             subprocess.run(
                 [sys.executable, "-m", "pip", "install", "faster-whisper"],
@@ -295,9 +313,7 @@ def get_duration(video_id):
     Retrieve the total duration of a YouTube video in seconds.
     """
     cmd = [
-        sys.executable,
-        "-m",
-        "yt_dlp",
+        *ytdlp_cmd(),
         "--get-duration",
         f"https://youtu.be/{video_id}"
     ]
@@ -426,7 +442,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
             pass
 
     cmd_download = [
-        sys.executable, "-m", "yt_dlp",
+        *ytdlp_cmd(),
         "--force-ipv4",
         "--quiet", "--no-warnings",
         "--downloader", "ffmpeg",
@@ -439,7 +455,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
         f"https://youtu.be/{video_id}"
     ]
     cmd_download_fallback = [
-        sys.executable, "-m", "yt_dlp",
+        *ytdlp_cmd(),
         "--force-ipv4",
         "--quiet", "--no-warnings",
         "--downloader", "ffmpeg",
@@ -481,7 +497,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
         if crop_mode == "default":
             if OUTPUT_RATIO == "original":
                 cmd_crop = [
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    ffmpeg_bin(), "-y", "-hide_banner", "-loglevel", "error",
                     "-i", temp_file,
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
                     "-c:a", "aac", "-b:a", "128k",
@@ -490,7 +506,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
             else:
                 vf = build_cover_scale_crop_vf(out_w, out_h)
                 cmd_crop = [
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    ffmpeg_bin(), "-y", "-hide_banner", "-loglevel", "error",
                     "-i", temp_file,
                     "-vf", vf,
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
@@ -501,7 +517,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
             if OUTPUT_RATIO == "original" or not out_w or not out_h or out_h < out_w:
                 vf = build_cover_scale_crop_vf(out_w or 720, out_h or 1280) if OUTPUT_RATIO != "original" else None
                 cmd_crop = [
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    ffmpeg_bin(), "-y", "-hide_banner", "-loglevel", "error",
                     "-i", temp_file,
                     *([] if not vf else ["-vf", vf]),
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
@@ -519,7 +535,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                     f"[top][bottom]vstack[out]"
                 )
                 cmd_crop = [
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    ffmpeg_bin(), "-y", "-hide_banner", "-loglevel", "error",
                     "-i", temp_file,
                     "-filter_complex", vf,
                     "-map", "[out]", "-map", "0:a?",
@@ -531,7 +547,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
             if OUTPUT_RATIO == "original" or not out_w or not out_h or out_h < out_w:
                 vf = build_cover_scale_crop_vf(out_w or 720, out_h or 1280) if OUTPUT_RATIO != "original" else None
                 cmd_crop = [
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    ffmpeg_bin(), "-y", "-hide_banner", "-loglevel", "error",
                     "-i", temp_file,
                     *([] if not vf else ["-vf", vf]),
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
@@ -549,7 +565,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                     f"[top][bottom]vstack[out]"
                 )
                 cmd_crop = [
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    ffmpeg_bin(), "-y", "-hide_banner", "-loglevel", "error",
                     "-i", temp_file,
                     "-filter_complex", vf,
                     "-map", "[out]", "-map", "0:a?",
@@ -598,7 +614,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                 
                 force_style = build_subtitle_force_style()
                 cmd_subtitle = [
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    ffmpeg_bin(), "-y", "-hide_banner", "-loglevel", "error",
                     "-i", cropped_file,
                     "-vf", f"subtitles='{subtitle_path}'{fontsdir_arg}:force_style='{force_style}'",
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",

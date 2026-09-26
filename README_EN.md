@@ -60,6 +60,45 @@ This is the web version of the original project: https://github.com/0xACAB666/yt
 - Internet connection
 - Optional: `faster-whisper` (for AI subtitles)
 
+## 🪟 Portable Windows Package (nothing to install)
+
+Grab `YoutubeHeatmapClipper_v<version>_x64_portable.zip` from
+[Releases](https://github.com/nawirwii/youtube-heatmap-clipper/releases/latest),
+extract it anywhere, then double-click `YoutubeHeatmapClipper.exe`.
+
+Bundled: Python 3.11 + Flask, ffmpeg, ffprobe, yt-dlp.exe, 92 font files and
+faster-whisper (the Whisper model itself downloads once, on first use).
+Full instructions: `portable/README-PORTABLE.txt` (shipped inside the zip).
+
+Other flags:
+
+```powershell
+YoutubeHeatmapClipper.exe --port 5050        # different port
+YoutubeHeatmapClipper.exe --no-browser       # do not open the browser
+YoutubeHeatmapClipper.exe --self-test        # verify package completeness
+YoutubeHeatmapClipper.exe --url "https://www.youtube.com/watch?v=ID" --crop split_left
+```
+
+Clips are written to `clips/` inside the package folder, so the whole folder can
+be moved around on a flash drive. If the app folder is not writable (e.g.
+extracted into `C:\Program Files`), output falls back to
+`%LOCALAPPDATA%\YoutubeHeatmapClipper\`.
+
+### Build it yourself (developer)
+
+Windows builds run on GitHub Actions, no local Windows machine needed:
+
+```text
+portable/fetch-deps.ps1      -> download ffmpeg/ffprobe/yt-dlp into bin/
+portable/yhc.spec            -> PyInstaller onedir
+portable/build-portable.ps1  -> build + exe --self-test + zip + verify zip contents
+portable/verify_portable.py  -> assert required FILE NAMES inside the zip
+portable/smoke-portable.ps1  -> boot the built exe, assert the UI is served
+```
+
+On Windows: `pwsh portable/build-portable.ps1 -Version 2.0.47`
+(add `-NoWhisper` for a smaller package without AI subtitles).
+
 ## How to Use (Easiest Way)
 
 Just double-click the **`start.bat`** file.

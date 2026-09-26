@@ -1,0 +1,5 @@
+# Dependency yang hanya dibutuhkan saat BUILD paket portable (bukan saat user
+# menjalankan aplikasinya). Dipisah dari requirements.txt supaya file itu tetap
+# hanya berisi dependency runtime.
+pyinstaller>=6.6,<7
+faster-whisper>=1.0.0

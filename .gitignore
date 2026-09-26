@@ -60,3 +60,9 @@ models/
 test.py
 check_*.py
 debug_*.py
+
+# Portable Windows build (lihat portable/)
+bin/
+build-portable/
+dist/
+models/

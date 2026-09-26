@@ -1,18 +1,26 @@
 import os
 import json
+import socket
 import subprocess
 import sys
 import threading
 import time
 import uuid
+import webbrowser
 from types import SimpleNamespace
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 import run as core
+from portable_runtime import bootstrap, resource_dir, ytdlp_cmd
 
 
-app = Flask(__name__, static_folder="static", template_folder="templates")
+RES_DIR = resource_dir()
+STATIC_DIR = os.path.join(RES_DIR, "static")
+TEMPLATE_DIR = os.path.join(RES_DIR, "templates")
+FONTS_DIR = os.path.join(RES_DIR, "fonts")
+
+app = Flask(__name__, static_folder=STATIC_DIR, template_folder=TEMPLATE_DIR)
 
 jobs_lock = threading.Lock()
 jobs = {}
@@ -49,6 +57,24 @@ def parse_time_to_seconds(value):
         h, m, sec = parts
         return int(h) * 3600 + int(m) * 60 + int(float(sec))
     return None
+
+
+def resolve_fonts_dir(value):
+    """Path absolut folder font.
+
+    Nilai relatif (mis. default UI = "fonts") selalu dibuka relatif ke folder
+    aset aplikasi, bukan ke CWD — penting untuk paket portable yang bisa
+    dijalankan dari folder mana pun.
+    """
+    if value:
+        raw = str(value).strip()
+        if raw:
+            if not os.path.isabs(raw):
+                candidate = os.path.join(RES_DIR, raw)
+                if os.path.isdir(candidate):
+                    return candidate
+            return raw
+    return FONTS_DIR if os.path.isdir(FONTS_DIR) else None
 
 
 def set_job(job_id, **patch):
@@ -96,9 +122,7 @@ def run_job(job_id, payload):
         whisper_model = payload.get("whisper_model") or "small"
         subtitle_font = payload.get("subtitle_font") or "Arial"
         subtitle_location = payload.get("subtitle_location") or "bottom"
-        subtitle_fontsdir = payload.get("subtitle_fontsdir") or None
-        if not subtitle_fontsdir and os.path.isdir("fonts"):
-            subtitle_fontsdir = "fonts"
+        subtitle_fontsdir = resolve_fonts_dir(payload.get("subtitle_fontsdir"))
         padding = safe_int(payload.get("padding"), 10)
         max_clips = safe_int(payload.get("max_clips"), 10)
         mode = payload.get("mode") or "heatmap"
@@ -185,7 +209,7 @@ def index():
 
 @app.get("/assets/fonts/<path:filename>")
 def serve_font(filename):
-    return send_from_directory("fonts", filename, as_attachment=False)
+    return send_from_directory(FONTS_DIR, filename, as_attachment=False)
 
 
 def get_preview(url):
@@ -199,9 +223,7 @@ def get_preview(url):
             return cached
 
     cmd = [
-        sys.executable,
-        "-m",
-        "yt_dlp",
+        *ytdlp_cmd(),
         "--skip-download",
         "-J",
         key,
@@ -304,5 +326,69 @@ def serve_clip(job_id, filename):
     return send_from_directory(job_dir, filename, as_attachment=True)
 
 
+def find_free_port(host, preferred, attempts=20):
+    """Port pertama yang bebas, mulai dari `preferred`."""
+    for offset in range(attempts):
+        candidate = preferred + offset
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                probe.bind((host, candidate))
+                return candidate
+            except OSError:
+                continue
+    return preferred
+
+
+def _open_browser_when_ready(url, timeout=20.0):
+    deadline = time.time() + timeout
+    host = url.split("//", 1)[1].split("/", 1)[0].split(":")[0]
+    port = int(url.rsplit(":", 1)[1].split("/", 1)[0])
+    while time.time() < deadline:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.settimeout(0.5)
+            if probe.connect_ex((host, port)) == 0:
+                webbrowser.open(url)
+                return
+        time.sleep(0.2)
+
+
+def serve(host="127.0.0.1", port=5000, open_browser=True, debug=False):
+    """Jalankan web app di thread utama (dipakai launcher + `python webapp.py`)."""
+    data_dir = bootstrap()
+    port = find_free_port(host, port)
+    url = f"http://{host}:{port}"
+
+    print("=" * 58)
+    print("  YouTube Heatmap Clipper")
+    print("=" * 58)
+    print(f"  Aplikasi   : {url}")
+    print(f"  Folder data: {data_dir}")
+    print(f"  Output     : {os.path.join(data_dir, 'clips')}")
+    print("-" * 58)
+    print("  Jangan tutup jendela ini selama app dipakai.")
+    print("  Untuk berhenti: tekan Ctrl+C atau tutup jendela ini.")
+    print("=" * 58)
+
+    if open_browser:
+        threading.Thread(
+            target=_open_browser_when_ready, args=(url,), daemon=True
+        ).start()
+
+    app.run(host=host, port=port, debug=debug, use_reloader=False, threaded=True)
+
+
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    import argparse
+
+    _parser = argparse.ArgumentParser(prog="webapp.py", add_help=False)
+    _parser.add_argument("--port", type=int, default=5000)
+    _parser.add_argument("--no-browser", action="store_true")
+    _parser.add_argument("--debug", action="store_true")
+    _opts, _ = _parser.parse_known_args()
+
+    serve(
+        port=_opts.port,
+        open_browser=not _opts.no_browser,
+        debug=_opts.debug,
+    )

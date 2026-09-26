@@ -1,0 +1,120 @@
+name: Portable Windows
+
+# PR/push  -> build + self-test + verifikasi zip (upload sebagai artifact)
+# tag v*   -> build yang sama, lalu upload ke GitHub Release
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "launcher.py"
+      - "portable_runtime.py"
+      - "run.py"
+      - "webapp.py"
+      - "requirements.txt"
+      - "templates/**"
+      - "static/**"
+      - "portable/**"
+      - ".github/workflows/portable.yml"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versi untuk asset (kosongkan = pakai file VERSION)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: portable-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build paket portable x64
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            portable/requirements-build.txt
+
+      - name: Cache bin/ eksternal
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: portable-bin-${{ runner.os }}-${{ hashFiles('portable/fetch-deps.ps1') }}
+          restore-keys: portable-bin-${{ runner.os }}-
+
+      - name: Tentukan versi
+        id: ver
+        shell: pwsh
+        run: |
+          $v = "${{ inputs.version }}".Trim()
+          if (-not $v) { $v = (Get-Content VERSION -Raw).Trim() }
+          if (-not $v) { throw "Versi tidak bisa ditentukan." }
+          if ($env:GITHUB_REF -like "refs/tags/v*") { $v = $env:GITHUB_REF -replace "^refs/tags/v", "" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "is_tag=$($env:GITHUB_REF -like 'refs/tags/v*')" >> $env:GITHUB_OUTPUT
+          Write-Host "versi paket: $v  (tag: $($env:GITHUB_REF))"
+
+      - name: Install dependency build
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r portable/requirements-build.txt
+          python -m PyInstaller --version
+
+      - name: Tarik ffmpeg / ffprobe / yt-dlp
+        shell: pwsh
+        run: pwsh -NoProfile -File portable/fetch-deps.ps1
+
+      - name: Build paket + self-test + verifikasi zip
+        shell: pwsh
+        run: pwsh -NoProfile -File portable/build-portable.ps1 -Version "${{ steps.ver.outputs.version }}" -SkipDeps
+
+      - name: "Smoke test: server benar-benar hidup"
+        shell: pwsh
+        run: portable/smoke-portable.ps1 -StageDir "build-portable\stage\YoutubeHeatmapClipper_v${{ steps.ver.outputs.version }}_x64"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: YouTubeHeatmapClipper_v${{ steps.ver.outputs.version }}_x64_portable
+          path: |
+            build-portable/YoutubeHeatmapClipper_v${{ steps.ver.outputs.version }}_x64_portable.zip
+            build-portable/YoutubeHeatmapClipper_v${{ steps.ver.outputs.version }}_x64_portable.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish ke GitHub Release
+        if: steps.ver.outputs.is_tag == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ steps.ver.outputs.version }}
+        run: |
+          $assets = @(
+            "build-portable/YoutubeHeatmapClipper_v${{ steps.ver.outputs.version }}_x64_portable.zip",
+            "build-portable/YoutubeHeatmapClipper_v${{ steps.ver.outputs.version }}_x64_portable.zip.sha256"
+          )
+          foreach ($a in $assets) { if (-not (Test-Path $a)) { throw "Asset hilang: $a" } }
+
+          # Pola idempotent: hapus release lama, buat ulang, lalu upload.
+          gh release delete $env:TAG --yes --cleanup-tag 2>$null
+          gh release create $env:TAG @assets `
+            --title "YouTube Heatmap Clipper v${{ steps.ver.outputs.version }} (portable Windows x64)" `
+            --generate-notes
+          gh release view $env:TAG --json assets --jq ".assets[].name"
