@@ -44,6 +44,9 @@ Ini versi web dari proyek original: https://github.com/0xACAB666/yt-heatmap-clip
 - Web UI (tanpa CLI) buat scan + clip
 - Preview metadata video (judul, channel, durasi, thumbnail)
 - Scan Most Replayed → list segments + preview per segment
+- Kalau video tidak punya data Most Replayed, otomatis pakai titik potong
+  berjarak rata dan menandai jelas di panel Segments bahwa itu fallback
+  (bukan data heatmap)
 - Select segments (multi select) + tombol Create Selected Clip
 - Custom start/end (manual) buat potong satu range
 - Output ratio: 9:16, 1:1, 16:9, original

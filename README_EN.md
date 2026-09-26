@@ -44,6 +44,9 @@ This is the web version of the original project: https://github.com/0xACAB666/yt
 - **Clean Web Interface**: No CLI required for scanning and clipping
 - **Video Metadata Preview**: View title, channel, duration, and thumbnail
 - **Heatmap Visualization**: List segments with individual previews
+- **Graceful Fallback**: If a video has no Most Replayed data, the app falls
+  back to evenly spaced cut points and labels them clearly in the Segments
+  panel, so a scan never comes back empty
 - **Batch Processing**: Multi-select segments and "Create Selected Clips"
 - **Custom Ranges**: Manually set Start/End times for custom clipping
 - **Multiple Aspect Ratios**: 9:16, 1:1, 16:9, or original ratio
