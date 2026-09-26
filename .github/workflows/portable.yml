@@ -55,14 +55,6 @@ jobs:
             requirements.txt
             portable/requirements-build.txt
 
-      # Regression test harus jalan SEBELUM build mahal. Testnya offline
-      # (pakai fixture HTML), jadi tidak bergantung koneksi ke YouTube.
-      - name: Unit test scan heatmap
-        shell: pwsh
-        run: |
-          python tests/test_heatmap_scan.py
-          if ($LASTEXITCODE -ne 0) { throw "Unit test heatmap gagal." }
-
       - name: Cache bin/ eksternal
         uses: actions/cache@v4
         with:
@@ -89,6 +81,15 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install -r portable/requirements-build.txt
           python -m PyInstaller --version
+
+      # Regression test jalan setelah dependency terpasang tapi SEBELUM build
+      # mahal. Testnya offline (pakai fixture HTML), jadi tidak bergantung
+      # koneksi ke YouTube dan hasilnya deterministik.
+      - name: Unit test scan heatmap
+        shell: pwsh
+        run: |
+          python tests/test_heatmap_scan.py
+          if ($LASTEXITCODE -ne 0) { throw "Unit test heatmap gagal." }
 
       - name: Tarik ffmpeg / ffprobe / yt-dlp
         shell: pwsh
