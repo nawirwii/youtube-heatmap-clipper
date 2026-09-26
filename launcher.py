@@ -119,7 +119,33 @@ def self_test(require_whisper=False):
             f"{exc}" if require_whisper else "tidak ada (subtitle AI nonaktif)",
         )
 
-    check("clip directory", True, os.path.join(data_dir, "clips"))
+    check("clip directory", os.access(data_dir, os.W_OK), os.path.join(data_dir, "clips"))
+
+    # Route clip harus inline untuk Play dan attachment untuk Download.
+    # Kalau keduanya satu route, <video> gagal memutar.
+    try:
+        _c = webapp.app.test_client()
+        _job = "selftest0000"
+        _dir = os.path.join(data_dir, "clips", _job)
+        os.makedirs(_dir, exist_ok=True)
+        with open(os.path.join(_dir, "clip_1.mp4"), "wb") as fh:
+            fh.write(b"\x00\x00\x00\x18ftypisom" + b"\x00" * 2048)
+
+        _play = _c.get(f"/clips/{_job}/clip_1.mp4")
+        _dl = _c.get(f"/download/{_job}/clip_1.mp4")
+        _gone = _c.get(f"/clips/{_job}/clip_404.mp4")
+        _inline = "attachment" not in (_play.headers.get("Content-Disposition") or "")
+        _attach = "attachment" in (_dl.headers.get("Content-Disposition") or "")
+        _nohtml = b"<!DOCTYPE html>" not in _gone.data
+        check(
+            "route clip",
+            _play.status_code == 200 and _inline and _attach and _gone.status_code == 404 and _nohtml,
+            f"play={_play.status_code}/{_inline} download={_attach} hilang={_gone.status_code}/nohtml={_nohtml}",
+        )
+        os.remove(os.path.join(_dir, "clip_1.mp4"))
+        os.rmdir(_dir)
+    except Exception as exc:
+        check("route clip", False, str(exc))
 
     # Parser heatmap harus ikut ter-prove di dalam paket, bukan cuma di repo.
     # Dipakai HTML sintetis supaya self-test tetap offline dan tidak bergantung

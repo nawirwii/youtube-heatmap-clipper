@@ -85,11 +85,12 @@ jobs:
       # Regression test jalan setelah dependency terpasang tapi SEBELUM build
       # mahal. Testnya offline (pakai fixture HTML), jadi tidak bergantung
       # koneksi ke YouTube dan hasilnya deterministik.
-      - name: Unit test scan heatmap
+      - name: Unit test heatmap dan pengiriman clip
         shell: pwsh
         run: |
           python tests/test_heatmap_scan.py
-          if ($LASTEXITCODE -ne 0) { throw "Unit test heatmap gagal." }
+          python tests/test_clip_delivery.py
+          if ($LASTEXITCODE -ne 0) { throw "Unit test gagal." }
 
       - name: Tarik ffmpeg / ffprobe / yt-dlp
         shell: pwsh

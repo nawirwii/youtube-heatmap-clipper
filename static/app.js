@@ -550,20 +550,25 @@ function renderProgress(job) {
     job.outputs.forEach((f) => {
       const el = document.createElement("div");
       el.className = "out";
-      const href = `/clips/${job.id}/${encodeURIComponent(f.name)}`;
+      const nama = encodeURIComponent(f.name);
+      // Route terpisah: /clips/ untuk diputar (inline), /download/ untuk
+      // diunduh. Kalau keduanya pakai route yang sama, header
+      // Content-Disposition: attachment bikin <video> gagal memutar.
+      const playHref = `/clips/${job.id}/${nama}`;
+      const dlHref = `/download/${job.id}/${nama}`;
       el.innerHTML = `
         <div class="outLeft">
-          <a href="${href}" target="_blank" rel="noreferrer">${f.name}</a>
+          <a href="${playHref}" target="_blank" rel="noreferrer">${f.name}</a>
           <div class="small">${Math.round((f.size || 0) / 1024)} KB</div>
         </div>
         <div class="outRight">
           <button class="btn ghost smallBtn" type="button" data-play="1">Play</button>
-          <a class="btn smallBtn" href="${href}" download>Download</a>
+          <a class="btn smallBtn" href="${dlHref}" download>Download</a>
         </div>
       `;
       el.querySelector("[data-play]")?.addEventListener("click", (ev) => {
         ev.preventDefault();
-        openClipPreview(f.name, href);
+        openClipPreview(f.name, playHref);
       });
       out.appendChild(el);
     });

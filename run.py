@@ -691,7 +691,116 @@ def format_timestamp(seconds):
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 
-def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default", use_subtitle=False, event_hook=None):
+def file_video_valid(path, min_bytes=1024):
+    """
+    True kalau file benar-benar bisa diputar sebagai video.
+
+    Ini dipakai supaya "progres selesai" tidak pernah berarti "file rusak".
+    Kegagalan umum: ffmpeg menulis 0 byte, atau proses download tertinggal
+    halaman error/consent YouTube yang tersimpan dengan ekstensi .mp4. Keduanya
+    berujung file yang tidak bisa diputar padahal progres bilang 100%.
+    """
+    if not os.path.isfile(path):
+        return False
+
+    try:
+        if os.path.getsize(path) < min_bytes:
+            return False
+    except OSError:
+        return False
+
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(64)
+    except OSError:
+        return False
+
+    # MP4/MKV punya box header ftyp atau EBML di 4 byte pertama
+    if head[4:8] == b"ftyp":
+        return True
+    if head.startswith(b"\x1a\x45\xdf\xa3"):
+        return True
+    # several container start with ID3 (mp3 dalam mp4)
+    if head.startswith(b"ID3"):
+        return True
+    if b"ftyp" in head:
+        return True
+
+    return False
+
+
+def download_source(video_id, start, end):
+    """
+    Unduh video ke file lokal dan kembalikan path-nya.
+
+    Versi lama memakai "--downloader ffmpeg" supaya ffmpeg yang seek di
+    stream URL. Cara itu rapuh: kalau format yang dipilih HLS (mis. itag 616),
+    ffmpeg harus me-resolve host chunk saat runtime dan itu gagal begitu saja
+    ("Temporary failure in name resolution"). Hasilnya file rusak atau 0 byte
+    yang tetap dinamai .mp4, sehingga progres bilang selesai tapi file tidak
+    bisa diputar.
+
+    Di sini yt-dlp mengunduh sendiri lewat downloader bawaannya (HLS ditangani
+    yt-dlp, bukan ffmpeg), lalu pemotongan dilakukan ffmpeg di tahap crop.
+    """
+    target = f"source_{video_id}.mp4"
+
+    for fmt in ("18", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b"):
+        cmd = [
+            *ytdlp_cmd(),
+            "--force-ipv4",
+            "--quiet", "--no-warnings",
+            "--no-playlist",
+            "--socket-timeout", "30",
+            "--retries", "5",
+            "-f", fmt,
+            "-o", target,
+            f"https://youtu.be/{video_id}",
+        ]
+        try:
+            subprocess.run(
+                cmd,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except subprocess.CalledProcessError:
+            if os.path.exists(target):
+                try:
+                    os.remove(target)
+                except OSError:
+                    pass
+            continue
+
+        if os.path.exists(target) and os.path.getsize(target) > 0:
+            return target
+
+        # yt-dlp kadang menempelkan ekstensi lain, misal .mp4.part atau .webm
+        for kandidat in (
+            target,
+            f"{target}.part",
+            target.replace(".mp4", ".webm"),
+            target.replace(".mp4", ".mkv"),
+        ):
+            if os.path.exists(kandidat) and os.path.getsize(kandidat) > 0:
+                if kandidat != target:
+                    os.replace(kandidat, target)
+                return target
+
+        if os.path.exists(target):
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+
+    return None
+
+
+def proses_satu_clip(
+    video_id, item, index, total_duration, crop_mode="default",
+    use_subtitle=False, event_hook=None, source_file=None,
+):
     """
     Download, crop, and export a single vertical clip
     based on a heatmap segment.
@@ -724,64 +833,27 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
         except Exception:
             pass
 
-    cmd_download = [
-        *ytdlp_cmd(),
-        "--force-ipv4",
-        "--quiet", "--no-warnings",
-        "--downloader", "ffmpeg",
-        "--downloader-args",
-        f"ffmpeg_i:-ss {start} -to {end} -hide_banner -loglevel error",
-        "--merge-output-format", "mkv",
-        "-f",
-        "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b",
-        "-o", temp_file,
-        f"https://youtu.be/{video_id}"
-    ]
-    cmd_download_fallback = [
-        *ytdlp_cmd(),
-        "--force-ipv4",
-        "--quiet", "--no-warnings",
-        "--downloader", "ffmpeg",
-        "--downloader-args",
-        f"ffmpeg_i:-ss {start} -to {end} -hide_banner -loglevel error",
-        "--merge-output-format", "mkv",
-        "-f", "bv*+ba/b",
-        "-o", temp_file,
-        f"https://youtu.be/{video_id}"
-    ]
-
     try:
-        try:
-            subprocess.run(
-                cmd_download,
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-        except subprocess.CalledProcessError as e:
-            stderr = (e.stderr or "").strip()
-            if "Requested format is not available" in stderr:
-                subprocess.run(
-                    cmd_download_fallback,
-                    check=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
-            else:
-                raise
+        # Pakai file yang sudah diunduh kalau ada (satu unduhan per job, lalu
+        # semua clip dipotong dari file itu). Kalau tidak, unduh sendiri.
+        if source_file and os.path.isfile(source_file) and os.path.getsize(source_file) > 0:
+            temp_file = source_file
+        else:
+            temp_file = download_source(video_id, start, end)
+            if not temp_file:
+                print("Failed to download video.")
+                return False
 
-        if not os.path.exists(temp_file):
-            print("Failed to download video segment.")
-            return False
+        # Potong hanya di sisi input ffmpeg supaya tidak perlu file terpisah.
+        durasi = max(0.5, end - start)
+        crop_input = ["-ss", f"{start:.3f}", "-t", f"{durasi:.3f}", "-i", temp_file]
 
         out_w, out_h = OUT_WIDTH, OUT_HEIGHT
         if crop_mode == "default":
             if OUTPUT_RATIO == "original":
                 cmd_crop = [
                     ffmpeg_bin(), "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", temp_file,
+                    *crop_input,
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
                     "-c:a", "aac", "-b:a", "128k",
                     cropped_file
@@ -790,7 +862,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                 vf = build_cover_scale_crop_vf(out_w, out_h)
                 cmd_crop = [
                     ffmpeg_bin(), "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", temp_file,
+                    *crop_input,
                     "-vf", vf,
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
                     "-c:a", "aac", "-b:a", "128k",
@@ -801,7 +873,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                 vf = build_cover_scale_crop_vf(out_w or 720, out_h or 1280) if OUTPUT_RATIO != "original" else None
                 cmd_crop = [
                     ffmpeg_bin(), "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", temp_file,
+                    *crop_input,
                     *([] if not vf else ["-vf", vf]),
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
                     "-c:a", "aac", "-b:a", "128k",
@@ -819,7 +891,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                 )
                 cmd_crop = [
                     ffmpeg_bin(), "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", temp_file,
+                    *crop_input,
                     "-filter_complex", vf,
                     "-map", "[out]", "-map", "0:a?",
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
@@ -831,7 +903,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                 vf = build_cover_scale_crop_vf(out_w or 720, out_h or 1280) if OUTPUT_RATIO != "original" else None
                 cmd_crop = [
                     ffmpeg_bin(), "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", temp_file,
+                    *crop_input,
                     *([] if not vf else ["-vf", vf]),
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
                     "-c:a", "aac", "-b:a", "128k",
@@ -849,7 +921,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                 )
                 cmd_crop = [
                     ffmpeg_bin(), "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", temp_file,
+                    *crop_input,
                     "-filter_complex", vf,
                     "-map", "[out]", "-map", "0:a?",
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
@@ -871,7 +943,9 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
             text=True
         )
 
-        os.remove(temp_file)
+        if temp_file != (source_file or ""):
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
 
         # Generate and burn subtitle if enabled
         if use_subtitle:
@@ -932,6 +1006,21 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                 except Exception:
                     pass
             os.rename(cropped_file, output_file)
+
+        # Jangan lapor sukses kalau hasilnya tidak benar-benar video. File
+        # rusak akan disimpan browser sebagai .mp4 tapi gagal diputar.
+        if not file_video_valid(output_file):
+            print(
+                f"Clip {index} gagal: file hasil bukan video yang valid "
+                f"(size={os.path.getsize(output_file) if os.path.exists(output_file) else 0})."
+            )
+            for f in [temp_file, cropped_file, subtitle_file, output_file]:
+                if os.path.exists(f):
+                    try:
+                        os.remove(f)
+                    except Exception:
+                        pass
+            return False
 
         print("Clip successfully generated.")
         if callable(event_hook):

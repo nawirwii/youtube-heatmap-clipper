@@ -1,5 +1,7 @@
+import glob
 import os
 import json
+import re
 import socket
 import subprocess
 import sys
@@ -9,10 +11,17 @@ import uuid
 import webbrowser
 from types import SimpleNamespace
 
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import (
+    Flask,
+    abort,
+    jsonify,
+    render_template,
+    request,
+    send_from_directory,
+)
 
 import run as core
-from portable_runtime import bootstrap, resource_dir, ytdlp_cmd
+from portable_runtime import bootstrap, data_dir, resource_dir, ytdlp_cmd
 
 
 RES_DIR = resource_dir()
@@ -77,6 +86,39 @@ def resolve_fonts_dir(value):
     return FONTS_DIR if os.path.isdir(FONTS_DIR) else None
 
 
+def clips_dir():
+    """
+    Folder clip absolut, bukan relatif terhadap CWD.
+
+    Route lama memakai string "clips", jadi kalau CWD tidak bisa ditulis
+    (executable dijalankan dari folder sistem) clip gagal dibuat, dan kalau
+    CWD berubah antara tulis dan baca, route membalas 404 -- yang tersimpan
+    di browser sebagai "clip_1.mp4" berisi HTML.
+    """
+    return os.path.abspath(os.path.join(data_dir(), "clips"))
+
+
+def job_dir_for(job_id):
+    """
+    Folder satu job, absolut dan tervalidasi.
+
+    Sebelumnya route dan penulisan clip memakai string relatif "clips", jadi
+    semuanya bergantung pada CWD. Paket portable menjalankan bootstrap() yang
+    melakukan chdir ke DATA_DIR; kalau CWD tidak bisa ditulis, clip gagal
+    dibuat, dan kalau CWD berubah antara tulis dan baca, route mengembalikan
+    404 -- yang tersimpan di browser sebagai "clip_1.mp4" berisi HTML.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", job_id or ""):
+        abort(404)
+
+    path = os.path.abspath(os.path.join(clips_dir(), job_id))
+    root = os.path.abspath(clips_dir())
+    if os.path.commonpath([root, path]) != root:
+        abort(404)
+
+    return path
+
+
 def set_job(job_id, **patch):
     with jobs_lock:
         job = jobs.get(job_id)
@@ -96,13 +138,25 @@ def add_log(job_id, line):
 
 
 def list_outputs(job_dir):
+    """
+    Hanya file yang benar-benar video yang ditampilkan sebagai hasil.
+
+    Kalau file rusak ikut masuk daftar, user menekan Play lalu mendapat
+    "gagal memutar" tanpa petunjuk apa pun.
+    """
     if not os.path.isdir(job_dir):
         return []
+
     items = []
     for name in os.listdir(job_dir):
         path = os.path.join(job_dir, name)
-        if os.path.isfile(path) and name.lower().endswith(".mp4"):
-            items.append({"name": name, "size": os.path.getsize(path)})
+        if not (os.path.isfile(path) and name.lower().endswith(".mp4")):
+            continue
+        if not core.file_video_valid(path):
+            print(f"  Lewati hasil rusak: {path}")
+            continue
+        items.append({"name": name, "size": os.path.getsize(path)})
+
     items.sort(key=lambda x: x["name"])
     return items
 
@@ -135,7 +189,7 @@ def run_job(job_id, payload):
         core.PADDING = max(0, padding if padding is not None else 10)
         core.set_ratio_preset(ratio)
 
-        job_dir = os.path.join("clips", job_id)
+        job_dir = job_dir_for(job_id)
         os.makedirs(job_dir, exist_ok=True)
         core.OUTPUT_DIR = job_dir
 
@@ -212,16 +266,64 @@ def run_job(job_id, payload):
             clip_index = safe_int(data.get("clip_index"), 0) or 0
             set_job(job_id, stage=stage, stage_at=now_ms(), stage_clip=clip_index)
 
+        # Unduh video-nya SEKALI per job, lalu semua clip dipotong dari file
+        # yang sama. Selain jauh lebih cepat untuk max_clips besar, ini juga
+        # menghindari satu unduhan per clip yang bisa gagal sendiri-sendiri.
+        set_job(job_id, stage="download", stage_at=now_ms(), status_text="unduh video")
+        source_file = core.download_source(video_id, 0, total_duration)
+        if not source_file:
+            raise RuntimeError(
+                "Gagal mengunduh video. YouTube bisa sedang membatasi akses dari "
+                "koneksi ini -- coba lagi nanti atau ganti video."
+            )
+
         success = 0
         for idx, item in enumerate(targets, start=1):
             set_job(job_id, current=idx, status_text=f"clip {idx}/{len(targets)}")
-            ok = core.proses_satu_clip(video_id, item, idx, total_duration, crop, subtitle, event_hook=event_hook)
+            ok = core.proses_satu_clip(
+                video_id, item, idx, total_duration, crop, subtitle,
+                event_hook=event_hook, source_file=source_file,
+            )
             if ok:
                 success += 1
             set_job(job_id, done=idx, success=success, outputs=list_outputs(job_dir))
 
-        set_job(job_id, status="done", finished_at=now_ms(), outputs=list_outputs(job_dir))
+        if source_file and os.path.exists(source_file):
+            try:
+                os.remove(source_file)
+            except OSError:
+                pass
+
+        outputs = list_outputs(job_dir)
+        if targets and not outputs:
+            # Semua clip gagal. Jangan lapor "done" karena itu bikin user
+            # mengira file ada padahal tidak ada yang bisa diputar.
+            set_job(
+                job_id,
+                status="error",
+                finished_at=now_ms(),
+                outputs=[],
+                error=(
+                    f"Tidak ada clip yang berhasil dibuat dari {len(targets)} "
+                    "segmen. Coba lagi, atau ganti video."
+                ),
+            )
+        else:
+            set_job(
+                job_id,
+                status="done",
+                finished_at=now_ms(),
+                success=len(outputs),
+                outputs=outputs,
+            )
     except Exception as e:
+        for sisa in ("source_*.mp4", "source_*.webm", "source_*.mkv", "temp_*.mkv",
+                     "temp_cropped_*.mp4", "temp_*.srt"):
+            for nama in glob.glob(os.path.join(clips_dir(), "*", sisa)):
+                try:
+                    os.remove(nama)
+                except OSError:
+                    pass
         set_job(job_id, status="error", error=str(e), finished_at=now_ms())
 
 
@@ -388,7 +490,34 @@ def api_job(job_id):
 
 @app.get("/clips/<job_id>/<path:filename>")
 def serve_clip(job_id, filename):
-    job_dir = os.path.join("clips", job_id)
+    """
+    Serve clip untuk diputar di <video>.
+
+    PENTING: jangan pakai as_attachment=True di sini. Header
+    Content-Disposition: attachment membuat browser memperlakukan respons
+    sebagai unduhan, bukan media, sehingga <video> gagal memutar. Route
+    download terpisah yang memakai as_attachment.
+    """
+    job_dir = job_dir_for(job_id)
+    path = os.path.join(job_dir, filename)
+
+    if not os.path.isfile(path):
+        # Jangan balas halaman HTML: browser akan menyimpannya sebagai .mp4
+        # dan user mengira itu videonya rusak.
+        return jsonify({"ok": False, "error": "Clip tidak ditemukan."}), 404
+
+    return send_from_directory(job_dir, filename, conditional=True)
+
+
+@app.get("/download/<job_id>/<path:filename>")
+def download_clip(job_id, filename):
+    """Route yang memang untuk diunduh."""
+    job_dir = job_dir_for(job_id)
+    path = os.path.join(job_dir, filename)
+
+    if not os.path.isfile(path):
+        return jsonify({"ok": False, "error": "Clip tidak ditemukan."}), 404
+
     return send_from_directory(job_dir, filename, as_attachment=True)
 
 
