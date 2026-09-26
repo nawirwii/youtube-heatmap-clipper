@@ -134,6 +134,11 @@ def self_test(require_whisper=False):
         _play = _c.get(f"/clips/{_job}/clip_1.mp4")
         _dl = _c.get(f"/download/{_job}/clip_1.mp4")
         _gone = _c.get(f"/clips/{_job}/clip_404.mp4")
+        for _resp in (_play, _dl, _gone):
+            try:
+                _resp.close()
+            except Exception:
+                pass
         _inline = "attachment" not in (_play.headers.get("Content-Disposition") or "")
         _attach = "attachment" in (_dl.headers.get("Content-Disposition") or "")
         _nohtml = b"<!DOCTYPE html>" not in _gone.data
@@ -142,8 +147,16 @@ def self_test(require_whisper=False):
             _play.status_code == 200 and _inline and _attach and _gone.status_code == 404 and _nohtml,
             f"play={_play.status_code}/{_inline} download={_attach} hilang={_gone.status_code}/nohtml={_nohtml}",
         )
-        os.remove(os.path.join(_dir, "clip_1.mp4"))
-        os.rmdir(_dir)
+        # Best-effort: di Windows file masih terkunci oleh Flask test
+        # client, jadi os.remove bisa gagal. Yang penting ceknya lulus.
+        try:
+            os.remove(os.path.join(_dir, "clip_1.mp4"))
+        except OSError:
+            pass
+        try:
+            os.rmdir(_dir)
+        except OSError:
+            pass
     except Exception as exc:
         check("route clip", False, str(exc))
 
