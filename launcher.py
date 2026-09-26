@@ -121,6 +121,47 @@ def self_test(require_whisper=False):
 
     check("clip directory", True, os.path.join(data_dir, "clips"))
 
+    # Parser heatmap harus ikut ter-prove di dalam paket, bukan cuma di repo.
+    # Dipakai HTML sintetis supaya self-test tetap offline dan tidak bergantung
+    # koneksi ke YouTube.
+    try:
+        import json
+
+        import run as core
+
+        contoh = (
+            '{"playabilityStatus":{"status":"OK"},'
+            '"videoDetails":{"lengthSeconds":"600"},'
+            '"markersList":{"markerType":"MARKER_TYPE_HEATMAP","markers":['
+            '{"startMillis":"0","durationMillis":"2000","intensityScoreNormalized":1},'
+            '{"startMillis":"2000","durationMillis":"2000","intensityScoreNormalized":0.8},'
+            '{"startMillis":"4000","durationMillis":"2000","intensityScoreNormalized":0.6},'
+            '{"startMillis":"300000","durationMillis":"2000","intensityScoreNormalized":0.5}'
+            '],"markersMetadata":[{"key":"HEATMAP"}]}}'
+        )
+
+        blok = core._cari_array_markers(contoh)
+        momen = core.gabung_marker(json.loads(blok)) if blok else []
+        cadangan = core.fallback_segments(600, count=3)
+
+        parser_ok = (
+            blok is not None
+            and len(momen) == 2
+            and core._status_playability(contoh) == "OK"
+            and core.durasi_dari_html(contoh) == 600
+        )
+        cadangan_ok = (
+            len(cadangan) == 3
+            and cadangan[-1]["start"] + cadangan[-1]["duration"] <= 600
+        )
+        check(
+            "parser heatmap",
+            bool(parser_ok and cadangan_ok),
+            f"{len(momen)} momen dari 4 marker, fallback {len(cadangan)} segment",
+        )
+    except Exception as exc:
+        check("parser heatmap", False, str(exc))
+
     lines.append("")
     if failures:
         lines.append(f"GAGAL: {len(failures)} cek tidak lulus -> {', '.join(failures)}")
