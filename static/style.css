@@ -820,6 +820,39 @@ select.input {
   background: rgba(124, 58, 237, .28);
 }
 
+/* Hashtag dibedakan dari tag: bentuknya sama, warnanya lain, supaya user
+   tidak salah mengira keduanya data yang sama. */
+.aiTag.hash {
+  border-color: rgba(34, 197, 94, .5);
+  background: rgba(34, 197, 94, .12);
+}
+
+.aiTag.hash:hover {
+  background: rgba(34, 197, 94, .24);
+}
+
+.aiCheck {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.aiCheck input {
+  accent-color: #7c3aed;
+  cursor: pointer;
+}
+
+.aiActionsSep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 4px;
+  background: var(--line);
+}
+
 .aiEmpty {
   color: rgba(255, 255, 255, .45);
   font-size: 12px;

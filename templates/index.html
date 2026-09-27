@@ -250,10 +250,14 @@
         </div>
 
         <div class="aiActions">
+          <button id="aiSaveBtn" class="btn ghost" type="button" data-i18n="btn.ai_save">Simpan config</button>
+          <button id="aiClearCfgBtn" class="btn ghost" type="button" data-i18n="btn.ai_clear_cfg">Hapus config</button>
+          <span class="aiActionsSep"></span>
           <button id="aiTestBtn" class="btn ghost" type="button" data-i18n="btn.ai_test">Test server</button>
           <button id="aiUseTranscript" class="btn ghost" type="button" data-i18n="btn.ai_use_transcript">Pakai transkrip</button>
           <button id="aiGenerateBtn" class="btn" type="button" data-i18n="btn.ai_generate">Generate metadata</button>
         </div>
+        <div id="aiConfigStatus" class="aiHint"></div>
         <div id="aiHint" class="aiHint"></div>
 
         <div id="aiResult" class="aiResult hide">
@@ -284,6 +288,21 @@
             </div>
             <div id="aiTags" class="aiTags"></div>
             <textarea id="aiTagsRaw" class="input aiTextarea aiTagsRaw" rows="2"></textarea>
+          </div>
+          <div class="aiField">
+            <div class="aiFieldHead">
+              <div class="label" data-i18n="label.ai.hashtags">Hashtag</div>
+              <div class="aiFieldActions">
+                <span id="aiHashtagCount" class="panelMeta"></span>
+                <button class="btn ghost smallBtn" type="button" data-copy="aiHashtags" data-i18n="btn.copy_all">Copy all</button>
+              </div>
+            </div>
+            <div class="aiHint" data-i18n="help.ai.hashtags"></div>
+            <label class="aiCheck">
+              <input type="checkbox" id="aiHashInDesc" checked />
+              <span data-i18n="js.ai.hash_desc_on">Hashtag ikut ditempel di akhir deskripsi</span>
+            </label>
+            <div id="aiHashtags" class="aiTags"></div>
           </div>
         </div>
       </section>

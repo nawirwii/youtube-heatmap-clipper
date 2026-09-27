@@ -55,10 +55,14 @@ Ini versi web dari proyek original: https://github.com/0xACAB666/yt-heatmap-clip
   - Pilih font (Plus Jakarta Sans / Roboto / Montserrat / Arial / Custom)
   - Pilih lokasi subtitle (Bottom / Centered)
   - Fonts dir support (folder fonts berisi .ttf/.otf)
-- Panel AI Metadata: bikin judul, deskripsi, dan tag dari topik video memakai
+- Panel AI Metadata: bikin judul, deskripsi, tag, dan hashtag dari topik video memakai
   LLM lokal (Ollama / LM Studio / llama.cpp / KoboldCpp / LocalAI)
   - Server cukup punya API OpenAI-compatible, alamat lokal atau LAN saja
   - Konteks dari link YouTube, atau tempel cuplikan transkrip sendiri
+  - Hashtag jadi field terpisah dan ditempel di akhir deskripsi (maks 15, sesuai
+    batas YouTube); kalau model tidak mengirim hashtag, otomatis diturunkan dari tag
+  - Simpan konfigurasi AI di server (base URL, model, gaya, timeout), jadi tetap
+    ada walau aplikasi pindah port; API key tidak pernah dikirim ke browser
   - Hasil bisa disalin per-field atau diunduh; tidak ada upload ke YouTube
   - Tiap jawaban bisa dipakai ulang: judul dibatasi 130 char, deskripsi 5000
     char, tag dibatasi 30 tag x 500 char (batas YouTube Studio)

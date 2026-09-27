@@ -59,6 +59,7 @@ hiddenimports = [
     "run",
     "webapp",
     "ai_meta",
+    "ai_config",
     "portable_runtime",
     "werkzeug.middleware.proxy_fix",
 ]

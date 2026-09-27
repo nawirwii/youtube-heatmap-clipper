@@ -13,6 +13,7 @@ yt-dlp / whisper tidak ikut terbawa) akan gagal di gate ini, bukan complaints
 dari user.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -204,6 +205,7 @@ def self_test(require_whisper=False):
     # Logika AI metadata juga harus ter-prove di dalam paket: kalau modulnya
     # tidak ikut ter-bundle, gejalanya baru muncul saat user menekan tombol.
     try:
+        import ai_config
         import ai_meta
 
         # Parser harus tetap menerima JSON rusak yang masih bisa diselamatkan,
@@ -233,10 +235,49 @@ def self_test(require_whisper=False):
         )
         bersih = (
             rapi["titles"] == ["Judul Bersih", "Judul Kembar"]
-            and rapi["description"].count("\n\n") == 1
+            # Baris kosong Description dirapatkan, lalu satu baris hashtag
+            # ditambahkan: jadi ada 2 pemisah, bukan 1.
+            and rapi["description"].count("\n\n") == 2
+            and rapi["description"].startswith("Baris satu\n\nBaris dua")
             and rapi["tags"] == ["fisika", "momentum"]
             and rapi["partial"] is False
         )
+
+        # Hashtag harus benar-benar muncul: menempel di akhir deskripsi dan
+        # tetap ada walau model sama sekali tidak mengirim field itu.
+        dengan_hash = ai_meta.parse_metadata(json.dumps({
+            "titles": ["Judul"],
+            "description": "Isi ringkas.",
+            "tags": ["belajar fisika", "momentum"],
+            "hashtags": ["#Fisika", "momentum"],
+        }))
+        tanpa_hash = ai_meta.parse_metadata(json.dumps({
+            "titles": ["Judul"],
+            "description": "Isi ringkas.",
+            "tags": ["belajar fisika", "momentum"],
+        }))
+        tanpa_desc = ai_meta.parse_metadata(json.dumps({
+            "titles": ["Judul"],
+            "description": "x" * 4000,
+            "tags": ["momentum"],
+            "hashtags": ["#a", "#b"],
+        }))
+
+        baris_hash = ai_meta.hashtag_line(avec := dengan_hash["hashtags"])
+        cek_hashtag = (
+            avec == ["#Fisika", "#momentum"]
+            and dengan_hash["description"].endswith(baris_hash)
+            and tanpa_hash["hashtags"] == ["#belajar", "#momentum"]
+            and len(ai_meta.hashtag_line(tanpa_desc["hashtags"])) > 0
+            and len(tanpa_desc["description"]) <= ai_meta.YOUTUBE_DESC_LIMIT
+        )
+        # Konfigurasi AI harus benar-benar bisa ditulis dan dibaca kembali.
+        cfg_path_uji = ai_config.config_path()
+        ada_akhirnya = ai_config.save({"model": "qwen2.5:3b"}) and bool(
+            ai_config.load().get("model") == "qwen2.5:3b"
+        )
+        ai_config.clear()
+        cek_config = ada_akhirnya and not os.path.exists(cfg_path_uji)
 
         # Alamat awan harus ditolak, dan penolakan tidak boleh bergantung pada
         # DNS: kalau DNS gagal, host awan tidak boleh dianggap lokal.
@@ -252,8 +293,10 @@ def self_test(require_whisper=False):
         )
         check(
             "logika AI metadata",
-            bool(parse_ai and bersih and tolak_awan and terima_lokal),
+            bool(parse_ai and bersih and cek_hashtag and cek_config
+                 and tolak_awan and terima_lokal),
             f"parser rusak={parse_ai} bersih={bersih} "
+            f"hashtag={cek_hashtag} config={cek_config} "
             f"tolak_awan={tolak_awan} terima_lokal={terima_lokal}",
         )
     except Exception as exc:

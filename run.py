@@ -2,6 +2,7 @@ import os
 import re
 import json
 import sys
+import time
 import subprocess
 import requests
 import shutil
@@ -20,8 +21,19 @@ PADDING = 10              # Extra seconds added before and after each detected s
 TOP_HEIGHT = 960          # Height for top section (center content) in split mode
 BOTTOM_HEIGHT = 320       # Height for bottom section (facecam) in split mode
 USE_SUBTITLE = True       # Enable auto subtitle using Faster-Whisper (4-5x faster)
-WHISPER_MODEL = "small"    # Whisper model size: tiny, base, small, medium, large
+WHISPER_MODEL = "small"    # Ukuran model Whisper: tiny, base, small, medium, large
 SUBTITLE_FONT = "Arial"
+
+# Batas tinggi sumber yang diunduh. Potongan 9:16 diambil dari tengah
+# frame 16:9, jadi sumber 1080p tidak menambah ketajaman yang benar-benar
+# dipakai - hanya menambah waktu unduh. User bisa menabraknya lewat
+# pengaturan kualitas, jadi ini bukan penyusutan diam-diam.
+DEFAULT_SOURCE_HEIGHT = 720
+
+# Model Whisper yang sudah dimuat, dipakai ulang antar clip dalam satu
+# proses. Memuat model 'small' berarti membaca ratusan MB dari disk; kalau
+# diulang untuk tiap clip, sebagian besar waktu proses habis untuk itu.
+_WHISPER_CACHE = {}
 SUBTITLE_FONTS_DIR = None
 SUBTITLE_LOCATION = "bottom"
 OUTPUT_RATIO = "9:16"
@@ -619,23 +631,44 @@ def ambil_durasi(video_id):
     return durasi_dari_html(html or "")
 
 
+def get_whisper_model(name=None):
+    """
+    Muat model Faster-Whisper sekali saja dan pakai ulang.
+
+    Sebelumnya setiap clip memanggil `WhisperModel(...)` ulang. Untuk model
+    'small' itu berarti membaca ratusan MB dari disk tiap kali, sementara
+    transkripnya sendiri cuma beberapa detik. Dengan 3 clip, sebagian besar
+    waktu proses habis untuk memuat model berulang kali.
+    """
+    from faster_whisper import WhisperModel
+
+    nama = (name or WHISPER_MODEL or "small").strip()
+    kunci = nama.lower()
+    model = _WHISPER_CACHE.get(kunci)
+    if model is not None:
+        print(f"  Memakai model Whisper '{nama}' yang sudah dimuat.")
+        return model
+
+    print(f"  Loading Faster-Whisper model '{nama}'...")
+    print(f"  (If this is first time, downloading ~{get_model_size(nama)}...)")
+    model = WhisperModel(nama, device="cpu", compute_type="int8")
+    _WHISPER_CACHE[kunci] = model
+    return model
+
+
 def generate_subtitle(video_file, subtitle_file, event_hook=None):
     """
     Generate subtitle file using Faster-Whisper for the given video.
     Returns True if successful, False otherwise.
     """
-    from faster_whisper import WhisperModel
-
     def load_and_transcribe():
         if callable(event_hook):
             try:
                 event_hook("stage", {"stage": "subtitle_model_load"})
             except Exception:
                 pass
-        print(f"  Loading Faster-Whisper model '{WHISPER_MODEL}'...")
-        print(f"  (If this is first time, downloading ~{get_model_size(WHISPER_MODEL)}...)")
-        model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
-        print("  ✅ Model loaded. Transcribing audio (4-5x faster than standard Whisper)...")
+        model = get_whisper_model()
+        print("  ✅ Model siap. Mentranskrip audio (4-5x lebih cepat dari Whisper biasa)...")
         if callable(event_hook):
             try:
                 event_hook("stage", {"stage": "subtitle_transcribe"})
@@ -729,23 +762,43 @@ def file_video_valid(path, min_bytes=1024):
     return False
 
 
-def download_source(video_id, start, end):
+def download_source(video_id, start=None, end=None, max_height=None):
     """
     Unduh video ke file lokal dan kembalikan path-nya.
 
     Versi lama memakai "--downloader ffmpeg" supaya ffmpeg yang seek di
-    stream URL. Cara itu rapuh: kalau format yang dipilih HLS (mis. itag 616),
+    stream URL. Cara itu rapuh: format yang dipilih HLS (mis. itag 616),
     ffmpeg harus me-resolve host chunk saat runtime dan itu gagal begitu saja
     ("Temporary failure in name resolution"). Hasilnya file rusak atau 0 byte
     yang tetap dinamai .mp4, sehingga progres bilang selesai tapi file tidak
-    bisa diputar.
+    bisa diputar. Diuji ulang: ffmpeg langsung ke URL googlevideo di mesin
+    ini gagal persis seperti itu, jadi jalur itu tidak dipakai lagi.
 
-    Di sini yt-dlp mengunduh sendiri lewat downloader bawaannya (HLS ditangani
+    Yang bisa dipercaya hanya downloader bawaan yt-dlp (HLS ditangani
     yt-dlp, bukan ffmpeg), lalu pemotongan dilakukan ffmpeg di tahap crop.
+
+    `max_height` membatasi resolusi sumber. Ini bukan sekadar penghematan:
+    untuk video 16:9, potongan 9:16 diambil dari tengah frame, jadi
+    resolusi di atas 720p sebagian besar terbuang. Meminta 1080p menambah
+    waktu unduh tanpa menambah ketajaman yang dipakai.
     """
     target = f"source_{video_id}.mp4"
 
-    for fmt in ("18", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b"):
+    if max_height is None:
+        max_height = DEFAULT_SOURCE_HEIGHT
+
+    # Urutan pilihan: sesuai batas, lalu batas lebih longgar, lalu apa adanya.
+    # Format 18 sengaja tidak dicoba: itu 360p progresif, jauh di bawah
+    # sebagian besar video modern, dan gagal di banyak video.
+    formats = []
+    if max_height:
+        formats += [
+            f"bv*[height<={max_height}][ext=mp4]+ba[ext=m4a]/bv*[height<={max_height}]+ba",
+        ]
+    formats.append("bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba")
+    formats.append("b")
+
+    for fmt in formats:
         cmd = [
             *ytdlp_cmd(),
             "--force-ipv4",
@@ -757,6 +810,7 @@ def download_source(video_id, start, end):
             "-o", target,
             f"https://youtu.be/{video_id}",
         ]
+        started = time.time()
         try:
             subprocess.run(
                 cmd,
@@ -774,6 +828,11 @@ def download_source(video_id, start, end):
             continue
 
         if os.path.exists(target) and os.path.getsize(target) > 0:
+            ukuran = os.path.getsize(target)
+            print(
+                f"  Unduhan selesai: {ukuran / 1024 / 1024:.1f} MB dalam "
+                f"{time.time() - started:.0f} detik (batas {max_height or 'tanpa'}p)."
+            )
             return target
 
         # yt-dlp kadang menempelkan ekstensi lain, misal .mp4.part atau .webm

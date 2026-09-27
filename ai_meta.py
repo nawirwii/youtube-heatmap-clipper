@@ -31,6 +31,15 @@ MAX_TAGS = 30
 MAX_TITLE_LEN = 130
 MAX_TRANSLIT_LEN = 480
 
+# YouTube hanya menampilkan maksimal 15 hashtag di atas judul. Lebih dari itu
+# tidak menambah jangkauan, cuma membuat deskripsi berantakan.
+MAX_HASHTAGS = 15
+MAX_HASHTAG_LEN = 60
+
+# Batas yang dipaksakan YouTube untuk deskripsi. MAX_DESC_CHARS sengaja lebih
+# kecil supaya masih ada ruang untuk baris hashtag diBELAKANG deskripsi.
+YOUTUBE_DESC_LIMIT = 5000
+
 # Sisa penanda JSON yang tidak pernah perlu muncul di teks final: escape
 # string dan karakter kontrol. Judul serta tag tidak butuh ini, dan user
 # tidak boleh melihatnya. Kurung kurawal sengaja TIDAK dihapus karena
@@ -151,15 +160,20 @@ def build_prompt(context, options=None):
         f"Writing tone: {tone}.",
         "",
         "Required JSON shape:",
-        '{"titles": ["..."], "description": "...", "tags": ["..."]}',
+        '{"titles": ["..."], "description": "...", "tags": ["..."], '
+        '"hashtags": ["#..."]}',
         "",
         "Rules:",
         f"- titles: exactly {n_titles} options, each under 100 characters, "
         "specific to the actual topic, no clickbait lies, no ALL CAPS spam.",
         "- description: 2-4 short paragraphs plus 3-5 short bullet points, "
-        f"under {MAX_DESC_CHARS} characters, plain text only, in {lang}.",
+        f"under {MAX_DESC_CHARS} characters, plain text only, in {lang}. "
+        "Do NOT write any hashtag in the description; it is added separately.",
         f"- tags: between 8 and {MAX_TAGS} lowercase tags, no '#' character, "
         "no duplicates, mix broad and specific search terms.",
+        f"- hashtags: between 3 and {MAX_HASHTAGS} items, each starting with '#', "
+        f"no spaces inside, under {MAX_HASHTAG_LEN} characters, no duplicates. "
+        "Pick the ones a viewer of this exact video would actually search for.",
         "- Do not invent facts that are not in the info below.",
         "- If the info is thin, write conservatively instead of guessing.",
         "",
@@ -285,11 +299,12 @@ def generate(base_url, model, context, options=None, timeout=None, api_key=None,
         raise AiError(
             f"Model '{model}' menjawab kosong. Coba model lain atau naikkan max token."
         )
-    result = parse_metadata(text)
+    result = parse_metadata(text, options)
     if log:
         log(
             f"Metadata done in {elapsed:.1f}s "
-            f"({len(result['titles'])} judul, {len(result['tags'])} tag)"
+            f"({len(result['titles'])} judul, {len(result['tags'])} tag, "
+            f"{len(result['hashtags'])} hashtag)"
         )
     result["elapsed"] = round(elapsed, 1)
     return result
@@ -417,13 +432,14 @@ def _balanced_object(text, start):
     return None, start
 
 
-def parse_metadata(text):
+def parse_metadata(text, options=None):
     """Ubah teks LLM jadi dict metadata yang rapi.
 
     Model kecil sering menambah markdown fence, mengulang kunci, atau memotong
     string di tengah. Semua itu dicoba diselamatkan selama masih ada isi
     yang bisa dipakai - hasil parsial lebih baik daripada seluruh hasil hilang.
     """
+    options = options or {}
     body = strip_fences(text)
     data = None
     try:
@@ -440,12 +456,17 @@ def parse_metadata(text):
     titles = _clean_titles(data.get("titles") or data.get("title"))
     description = _clean_desc(data.get("description") or data.get("desc"))
     tags = _clean_tags(data.get("tags") or data.get("keywords"))
+    hashtags = _clean_hashtags(data.get("hashtags") or data.get("hashtag"), tags)
 
     if not titles and not description and not tags:
         raise AiError(
             "Model menjawab JSON tapi isinya kosong. "
             "Coba model lain atau perbaiki instruksi tambahan."
         )
+
+    if options.get("hashtags_in_description", True):
+        description = append_hashtags(description, hashtags)
+
     # Parsial berarti ada bagian yang benar-benar kosong, bukan cuma jawaban
     # yang perlu dibongkar dari fence atau kalimat tambahan. Model yang
     # talkatif tapi lengkap tetap dihitung utuh.
@@ -453,6 +474,7 @@ def parse_metadata(text):
         "titles": titles,
         "description": description,
         "tags": tags,
+        "hashtags": hashtags,
         "partial": not (titles and description and tags),
     }
 
@@ -685,6 +707,97 @@ def _clean_tags(value):
     return out
 
 
+def _clean_hashtags(value, fallback_tags=None):
+    """Normalisasi hashtag: selalu diawali '#', tanpa spasi, unik, maksimal 15.
+
+    Kalau model tidak mengirim hashtags sama sekali, turunkan dari tag yang
+    ada. Lebih baik hashtag turunan daripada kolom kosong: hashtag adalah
+    bagian dari metadata yang benar-benar terpakai user saat mengunggah.
+    """
+    # Bedakan "turunkan dari tag" dari " hashtag dari model": untuk tag,
+    # frasa ber-spasi tidak dipecah jadi beberapa hashtag, karena
+    # "belajar fisika" adalah satu istilah, bukan "#belajar #fisika".
+    turunan = value is None and fallback_tags is not None
+    if value is None:
+        value = fallback_tags
+    if isinstance(value, str):
+        value = re.split(r"[,\n]", value)
+    if not isinstance(value, list):
+        return []
+    if turunan:
+        value = [str(t).strip().split(" ", 1)[0] for t in value]
+
+    out = []
+    seen = set()
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        # Satu item bisa memuat beberapa hashtag sekaligus, misal
+        # 'Hashtags: #a #b'. Pisahkan dulu supaya keduanya tidak hilang.
+        for bagian in item.split():
+            t = bagian.strip().strip("\"'`").strip()
+            t = re.sub(r"\\[nrt]", " ", t)
+            t = t.lstrip("#").strip()
+            t = re.sub(r"^[\\-\\*\\d\\.\\)\\s]+", "", t)
+            # Buang label seperti "hashtag:" atau "kata kunci:" yang kadang
+            # ditulis model sebelum daftar hashtag.
+            t = re.sub(
+                r"^(?:hashtags?|hash|kata\s*kunci|keywords?)\s*[:\-]\s*$", "", t,
+                flags=re.I,
+            )
+            t = t.strip(" .,:;|#*_")
+            if not t or len(t) > MAX_HASHTAG_LEN:
+                continue
+            if not re.search(r"[a-z0-9]", t.lower()):
+                continue
+            key = t.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append("#" + t)
+            if len(out) >= MAX_HASHTAGS:
+                return out
+    return out
+
+
+def hashtag_line(hashtags):
+    """Gabungkan hashtag jadi satu baris siap tempel, atau string kosong."""
+    if not hashtags:
+        return ""
+    return " ".join(h for h in hashtags if isinstance(h, str) and h.strip())
+
+
+def append_hashtags(description, hashtags):
+    """Tempel baris hashtag di akhir deskripsi, tetap di bawah batas YouTube.
+
+    YouTube menghitung hashtag sebagai bagian dari deskripsi, jadi batas
+    5000 karakter dihitung setelah digabung. Kalau tidak muat, deskripsi yang
+    dipotong - bukan hashtag yang dibuang, karena hashtag justru bagian yang
+    paling wanted user.
+    """
+    line = hashtag_line(hashtags)
+    desc = (description or "").strip()
+    if not line:
+        return desc
+    if line in desc:
+        return desc
+
+    block = f"{desc}\n\n{line}" if desc else line
+    if len(block) <= YOUTUBE_DESC_LIMIT:
+        return block
+
+    room = YOUTUBE_DESC_LIMIT - len(line) - 2
+    if room <= 0:
+        return line[:YOUTUBE_DESC_LIMIT]
+    cut = desc[:room]
+    # Potong di batas paragraf kalau ada, supaya kalimat tidak terpotong
+    # tepat di tengah kata.
+    nl = cut.rfind("\n")
+    if nl > room // 2:
+        cut = cut[:nl]
+    return f"{cut.rstrip()}\n\n{line}"
+
+
 # --------------------------------------------------------------------------
 # Ringkasan untuk UI
 # --------------------------------------------------------------------------
@@ -697,7 +810,8 @@ def youtube_limits():
     """Batas yang dipaksakan YouTube, dipakai untuk explanation di UI."""
     return {
         "title": 100,
-        "description": 5000,
+        "description": YOUTUBE_DESC_LIMIT,
         "tag_max_len": MAX_TRANSLIT_LEN,
         "tags_total": 500,
+        "hashtags": MAX_HASHTAGS,
     }

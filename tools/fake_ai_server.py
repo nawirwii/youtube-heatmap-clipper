@@ -53,10 +53,23 @@ _BAIK = {
 }
 
 
+# Mode terpisah supaya test lama tidak ikut berubah: model yang mengirim
+# hashtag eksplisit, dan model yang sama sekali tidak mengirimnya.
+_DENGAN_HASHTAG = dict(_BAIK)
+_DENGAN_HASHTAG["hashtags"] = [
+    "#Fisika", "#Momentum", "#BelajarFisika", "#impuls",
+    "#dokumenter", "#fyp", "",
+]
+_TANPA_HASHTAG = dict(_BAIK)
+_TANPA_HASHTAG.pop("hashtags", None)
+
+
 # Nama model menentukan cara server merespons, jadi tiap kasus ujinya
 # bisa dipanggil lewat nama yang jelas.
 MODES = {
     "good": {"content": json.dumps(_BAIK, ensure_ascii=False)},
+    "hashtag": {"content": json.dumps(_DENGAN_HASHTAG, ensure_ascii=False)},
+    "no_hashtag": {"content": json.dumps(_TANPA_HASHTAG, ensure_ascii=False)},
     # Model kecil yang membungkus JSON dengan markdown fence.
     "fenced": {"content": '```json\n' + json.dumps(
         {"titles": ["Judul A", "Judul B"],

@@ -118,6 +118,20 @@ const I18N = {
     "js.ai.tr_title": "Judul hasil generate",
     "js.ai.desc_empty": "(model tidak memberi judul)",
     "js.ai.tags_empty": "(model tidak memberi tag)",
+    "js.ai.hash_empty": "(model tidak memberi hashtag)",
+    "js.ai.hash_desc_on": "Hashtag ikut ditempel di akhir deskripsi",
+    "js.ai.hash_desc_off": "Hashtag tidak ditempel di deskripsi",
+    "js.ai.cfg_saving": "Menyimpan config AI...",
+    "js.ai.cfg_saved": "Config AI tersimpan di server.",
+    "js.ai.cfg_saved_key": "Config AI tersimpan (termasuk API key di server).",
+    "js.ai.cfg_loaded": "Config AI dimuat dari server.",
+    "js.ai.cfg_loaded_key": "Config AI dimuat. API key tersimpan dipakai dari server.",
+    "js.ai.cfg_cleared": "Config AI dihapus dari server.",
+    "js.ai.cfg_failed": "Gagal menyimpan config:",
+    "btn.ai_save": "Simpan config",
+    "btn.ai_clear_cfg": "Hapus config",
+    "label.ai.hashtags": "Hashtag",
+    "help.ai.hashtags": "Hashtag ditempel di akhir deskripsi dan bisa di atas judul. Maksimal 15 yang tampil.",
     "js.ai.busy": "Still jalan...",
   },
   en: {
@@ -237,6 +251,20 @@ const I18N = {
     "js.ai.tr_title": "Generated title",
     "js.ai.desc_empty": "(model returned no title)",
     "js.ai.tags_empty": "(model returned no tags)",
+    "js.ai.hash_empty": "(model returned no hashtags)",
+    "js.ai.hash_desc_on": "Hashtags are appended to the description",
+    "js.ai.hash_desc_off": "Hashtags are not appended to the description",
+    "js.ai.cfg_saving": "Saving AI config...",
+    "js.ai.cfg_saved": "AI config saved on the server.",
+    "js.ai.cfg_saved_key": "AI config saved (including the API key on the server).",
+    "js.ai.cfg_loaded": "AI config loaded from the server.",
+    "js.ai.cfg_loaded_key": "AI config loaded. The stored API key is used from the server.",
+    "js.ai.cfg_cleared": "AI config removed from the server.",
+    "js.ai.cfg_failed": "Could not save config:",
+    "btn.ai_save": "Save config",
+    "btn.ai_clear_cfg": "Clear config",
+    "label.ai.hashtags": "Hashtags",
+    "help.ai.hashtags": "Hashtags are appended to the description and can also sit above the title. YouTube shows at most 15.",
     "js.ai.busy": "Still running...",
   },
 };
@@ -429,7 +457,9 @@ async function postJson(url, body) {
 
 const AI_LS_KEY = "yhc.ai.settings";
 let aiBusy = false;
-let aiMetaData = { titles: [], description: "", tags: [] };
+let aiMetaData = { titles: [], description: "", tags: [], hashtags: [] };
+// Apakah baris hashtag ditempel di akhir deskripsi.
+let aiHashInDesc = true;
 let aiTranscript = "";
 
 function aiLoadSettings() {
@@ -441,21 +471,112 @@ function aiLoadSettings() {
   }
 }
 
-function aiSaveSettings() {
-  const payload = {
+function aiCollectSettings() {
+  return {
     base_url: $("aiBaseUrl").value.trim(),
     model: $("aiModel").value.trim(),
     api_key: $("aiApiKey").value,
     tone: $("aiTone").value,
     timeout: Number($("aiTimeout").value) || 600,
     note: $("aiNote").value.trim(),
+    transcript: aiTranscript || "",
+    options: {
+      hashtags_in_description: aiHashInDesc !== false,
+    },
   };
+}
+
+function aiSaveSettings() {
+  const payload = aiCollectSettings();
   try {
-    localStorage.setItem(AI_LS_KEY, JSON.stringify(payload));
+    // API key sengaja tidak ditulis ke localStorage. Kalau browser dipakai
+    // di komputer bersama, kunci tidak ikut bocor lewat storage; key yang
+    // sudah disimpan tetap ada di file config server.
+    const untukBrowser = { ...payload };
+    delete untukBrowser.api_key;
+    localStorage.setItem(AI_LS_KEY, JSON.stringify(untukBrowser));
   } catch (e) {
     // Penyimpanan penuh atau ditolak browser: bukan kondisi fatal.
   }
   return payload;
+}
+
+async function aiSaveConfigServer() {
+  // Config disimpan di server, bukan hanya localStorage: aplikasi portable
+  // memakai find_free_port(), jadi kalau port 5000 dipakai, browser pindah
+  // origin dan localStorage ikut hilang. Config di server tetap ada.
+  aiSaveSettings();
+  const st = $("aiConfigStatus");
+  st.textContent = t("js.ai.cfg_saving");
+  try {
+    const res = await fetch("/api/ai/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(aiCollectSettings()),
+    });
+    const j = await res.json();
+    if (!res.ok || !j.ok) throw new Error(j.error || res.statusText);
+    st.textContent = j.config && j.config.has_api_key
+      ? t("js.ai.cfg_saved_key")
+      : t("js.ai.cfg_saved");
+  } catch (e) {
+    st.textContent = t("js.ai.cfg_failed") + " " + (e.message || e);
+  }
+}
+
+async function aiClearConfigServer() {
+  const st = $("aiConfigStatus");
+  st.textContent = t("js.ai.cfg_saving");
+  try {
+    const res = await fetch("/api/ai/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reset: true }),
+    });
+    if (!res.ok) throw new Error(res.statusText);
+    try { localStorage.removeItem(AI_LS_KEY); } catch (e) { /* abaikan */ }
+    $("aiApiKey").value = "";
+    $("aiConfigStatus").textContent = t("js.ai.cfg_cleared");
+  } catch (e) {
+    st.textContent = t("js.ai.cfg_failed") + " " + (e.message || e);
+  }
+}
+
+async function aiRestoreConfigFromServer() {
+  // Isi form dari config tersimpan server. localStorage tetap jadi fallback
+  // supaya tetap jalan kalau endpoint config tidak tersedia.
+  try {
+    const res = await fetch("/api/ai/config");
+    if (!res.ok) return false;
+    const j = await res.json();
+    const c = (j && j.config) || {};
+    if (!Object.keys(c).length) return false;
+    if (c.base_url) $("aiBaseUrl").value = c.base_url;
+    if (c.model) $("aiModel").value = c.model;
+    if (c.tone) $("aiTone").value = c.tone;
+    if (c.timeout) $("aiTimeout").value = c.timeout;
+    if (c.note) $("aiNote").value = c.note;
+    if (typeof c.transcript === "string" && c.transcript) {
+      $("aiTranscript").value = c.transcript;
+    }
+    if (typeof c.hashtags_in_description === "boolean") {
+      aiHashInDesc = c.hashtags_in_description;
+    }
+    const chk = $("aiHashInDesc");
+    if (chk) {
+      chk.checked = aiHashInDesc;
+      const label = chk.parentElement?.querySelector("span");
+      if (label) label.textContent = t(aiHashInDesc ? "js.ai.hash_desc_on" : "js.ai.hash_desc_off");
+    }
+    // API key sengaja tidak dikirim balik ke browser. Kalau ada key
+    // tersimpan, kolom dikosongkan dan server yang tetap memakainya.
+    $("aiConfigStatus").textContent = c.has_api_key
+      ? t("js.ai.cfg_loaded_key")
+      : t("js.ai.cfg_loaded");
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 function aiRestoreSettings() {
@@ -534,6 +655,7 @@ function aiCollectPayload() {
       note: s.note,
       timeout: s.timeout,
       n_titles: 3,
+      hashtags_in_description: s.options.hashtags_in_description !== false,
     },
   };
 }
@@ -553,6 +675,9 @@ function aiRenderResult(meta) {
     titles: Array.isArray(meta.titles) ? meta.titles : [],
     description: meta.description || "",
     tags: Array.isArray(meta.tags) ? meta.tags : [],
+    hashtags: Array.isArray(meta.hashtags)
+      ? meta.hashtags
+      : (typeof meta.hashtags === "string" ? meta.hashtags.split(/[\s,]+/).filter(Boolean) : []),
   };
 
   const box = $("aiTitles");
@@ -598,6 +723,25 @@ function aiRenderResult(meta) {
   }
   $("aiTagsRaw").value = aiMetaData.tags.join(", ");
 
+  // Hashtag ditampilkan terpisah supaya jelas ini tidak sama dengan tag,
+  // dan bisa disalin tanpa mengambil baris hashtag di dalam deskripsi.
+  const hashBox = $("aiHashtags");
+  hashBox.innerHTML = "";
+  if (aiMetaData.hashtags.length) {
+    aiMetaData.hashtags.forEach((tag) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "aiTag hash";
+      chip.textContent = tag;
+      chip.title = t("btn.copy");
+      chip.addEventListener("click", () => aiCopy(tag, chip));
+      hashBox.appendChild(chip);
+    });
+  } else {
+    hashBox.innerHTML = '<div class="aiEmpty">' + t("js.ai.hash_empty") + "</div>";
+  }
+  $("aiHashtagCount").textContent = aiMetaData.hashtags.length + " / 15";
+
   $("aiDescCount").textContent = aiMetaData.description.length + " / 5000";
   const tagChars = aiMetaData.tags.reduce((a, b) => a + b.length + 1, 0);
   $("aiTagCount").textContent =
@@ -607,13 +751,15 @@ function aiRenderResult(meta) {
 }
 
 function aiRenderIdle() {
-  aiMetaData = { titles: [], description: "", tags: [] };
+  aiMetaData = { titles: [], description: "", tags: [], hashtags: [] };
   $("aiTitles").innerHTML = "";
   $("aiTags").innerHTML = "";
+  $("aiHashtags").innerHTML = "";
   $("aiTagsRaw").value = "";
   $("aiDescription").value = "";
   $("aiDescCount").textContent = "";
   $("aiTagCount").textContent = "";
+  $("aiHashtagCount").textContent = "";
   $("aiResult").classList.add("hide");
 }
 
@@ -653,6 +799,12 @@ function aiTitlesAsText() {
 
 function aiTagsAsText() {
   return aiMetaData.tags.join(", ");
+}
+
+function aiHashtagsAsText() {
+  // Hashtag dipakai apa adanya (sudah diawali #) dan dipisah spasi, karena
+  // itu bentuk yang ditempel di deskripsi YouTube.
+  return aiMetaData.hashtags.join(" ");
 }
 
 async function aiTestServer() {
@@ -1112,9 +1264,22 @@ $("modalClose").addEventListener("click", closeModal);
 $("aiTestBtn").addEventListener("click", aiTestServer);
 $("aiGenerateBtn").addEventListener("click", aiGenerate);
 $("aiUseTranscript").addEventListener("click", aiReadTranscriptBox);
-["aiBaseUrl", "aiModel", "aiTone", "aiTimeout", "aiNote"].forEach((id) => {
+$("aiSaveBtn").addEventListener("click", aiSaveConfigServer);
+$("aiHashInDesc")?.addEventListener("change", (e) => {
+  aiHashInDesc = e.target.checked;
+  const label = e.target.parentElement?.querySelector("span");
+  if (label) label.textContent = t(aiHashInDesc ? "js.ai.hash_desc_on" : "js.ai.hash_desc_off");
+  aiSaveSettings();
+});
+$("aiClearCfgBtn").addEventListener("click", aiClearConfigServer);
+["aiBaseUrl", "aiModel", "aiTone", "aiTimeout", "aiNote", "aiApiKey"].forEach((id) => {
   $(id)?.addEventListener("change", () => { aiSaveSettings(); aiSetStatus(""); });
 });
+// Kolom API key tidak ikut auto-save ke localStorage: tidak ada alasan
+// menyalin kunci ke storage browser kalau sudah aman di server.
+$("aiApiKey")?.addEventListener("input", () => aiSetStatus(""));
+// Kolom API key tidak ikut auto-save ke localStorage: tidak perlu menyalin
+// kunci ke storage browser karena sudah aman di file config server.
 document.querySelectorAll("[data-copy]").forEach((btn) => {
   btn.addEventListener("click", () => {
     const src = btn.dataset.copy;
@@ -1122,7 +1287,9 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       ? aiTitlesAsText()
       : src === "aiDescription"
         ? ($("aiDescription").value || "")
-        : aiTagsAsText();
+        : src === "aiHashtags"
+          ? aiHashtagsAsText()
+          : aiTagsAsText();
     aiCopy(text, btn);
   });
 });
@@ -1142,3 +1309,8 @@ toggleFont();
 renderSegments([]);
 aiRestoreSettings();
 aiRenderIdle();
+// Config server adalah sumber utama; localStorage hanya fallback supaya
+// form tidak kosong kalau endpoint config gagal dijangkau.
+aiRestoreConfigFromServer().then((ok) => {
+  if (!ok && $("aiConfigStatus")) $("aiConfigStatus").textContent = "";
+});

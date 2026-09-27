@@ -20,6 +20,7 @@ from flask import (
     send_from_directory,
 )
 
+import ai_config
 import ai_meta
 import run as core
 from portable_runtime import bootstrap, data_dir, resource_dir, ytdlp_cmd
@@ -181,6 +182,9 @@ def run_job(job_id, payload):
         padding = safe_int(payload.get("padding"), 10)
         max_clips = safe_int(payload.get("max_clips"), 10)
         mode = payload.get("mode") or "heatmap"
+        source_height = safe_int(payload.get("source_height"), None) or (
+            core.DEFAULT_SOURCE_HEIGHT
+        )
         set_job(job_id, subtitle_enabled=subtitle)
 
         core.WHISPER_MODEL = whisper_model
@@ -271,12 +275,29 @@ def run_job(job_id, payload):
         # yang sama. Selain jauh lebih cepat untuk max_clips besar, ini juga
         # menghindari satu unduhan per clip yang bisa gagal sendiri-sendiri.
         set_job(job_id, stage="download", stage_at=now_ms(), status_text="unduh video")
-        source_file = core.download_source(video_id, 0, total_duration)
+        started_download = time.time()
+        add_log(
+            job_id,
+            f"Unduh video (maks {source_height}p). Ini tahap paling lama "
+            "kalau koneksi sedang lambat.",
+        )
+        source_file = core.download_source(
+            video_id, 0, total_duration, max_height=source_height
+        )
         if not source_file:
             raise RuntimeError(
                 "Gagal mengunduh video. YouTube bisa sedang membatasi akses dari "
                 "koneksi ini -- coba lagi nanti atau ganti video."
             )
+        unduh_detik = time.time() - started_download
+        try:
+            ukuran_mb = os.path.getsize(source_file) / 1024 / 1024
+        except OSError:
+            ukuran_mb = 0.0
+        add_log(
+            job_id,
+            f"Video terunduh: {ukuran_mb:.1f} MB dalam {unduh_detik:.0f} detik.",
+        )
 
         success = 0
         for idx, item in enumerate(targets, start=1):
@@ -552,16 +573,54 @@ def build_ai_context(payload):
 
 
 def _ai_settings(payload):
-    """Ambil + bersihkan pengaturan AI dari request."""
+    """Ambil + bersihkan pengaturan AI dari request.
+
+    Field yang tidak dikirim browser diisi dari config tersimpan, jadi user
+    tidak perlu mengetik ulang model/url setiap kali aplikasi dibuka.
+    """
     options = payload.get("options") or {}
     if not isinstance(options, dict):
         options = {}
-    return {
-        "base_url": payload.get("base_url"),
-        "model": (payload.get("model") or "").strip(),
-        "api_key": (payload.get("api_key") or "").strip(),
-        "options": options,
+    stored = ai_config.load()
+    stored_options = {
+        "tone": stored.get("tone"),
+        "timeout": stored.get("timeout"),
+        "n_titles": stored.get("n_titles"),
+        "note": stored.get("note"),
+        "hashtags_in_description": stored.get("hashtags_in_description", True),
     }
+    merged = {k: v for k, v in stored_options.items() if v is not None}
+    merged.update({k: v for k, v in options.items() if v is not None})
+
+    # API key tidak pernah dikirim balik ke browser. Kalau kolomnya kosong di
+    # browser, pakai yang tersimpan di server.
+    api_key = (payload.get("api_key") or "").strip()
+    if not api_key:
+        api_key = ai_config.api_key()
+
+    return {
+        "base_url": (payload.get("base_url") or stored.get("base_url")),
+        "model": (payload.get("model") or "").strip() or (stored.get("model") or ""),
+        "api_key": api_key,
+        "options": merged,
+    }
+
+
+@app.get("/api/ai/config")
+def api_ai_config_get():
+    """Kembalikan config AI tersimpan. API key tidak ikut di sini."""
+    return jsonify({"ok": True, "config": ai_config.load()})
+
+
+@app.post("/api/ai/config")
+def api_ai_config_save():
+    """Simpan config AI ke disk supaya tetap ada di sesi berikutnya."""
+    payload = request.get_json(silent=True) or {}
+    if payload.get("reset"):
+        ai_config.clear()
+        return jsonify({"ok": True, "config": ai_config.load(), "reset": True})
+    saved = ai_config.save(payload)
+    return jsonify({"ok": True, "config": saved})
 
 
 @app.post("/api/ai/probe")

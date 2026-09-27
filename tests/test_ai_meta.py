@@ -137,7 +137,10 @@ class TestParseMetadata:
 
     def test_fence_markdown(self):
         r = ai_meta.parse_metadata('```json\n{"titles": ["A"], "description": "D", "tags": ["x"]}\n```')
-        assert r["titles"] == ["A"] and r["description"] == "D"
+        # Deskripsi sudah termasuk baris hashtag; fence tetap dibuang.
+        assert r["titles"] == ["A"]
+        assert r["description"] == "D\n\n#x"
+        assert "```" not in r["description"]
 
     def test_fence_tanpa_json_label(self):
         r = ai_meta.parse_metadata('```\n{"titles": ["A"], "description": "D", "tags": ["x"]}\n```')
@@ -352,7 +355,11 @@ class TestGenerateHTTP:
     def test_talkatif_tidak_mengganggu(self, ai_server):
         r = gen(ai_server, "chatty")
         assert r["titles"] == ["Satu", "Dua"]
-        assert r["description"] == "Isi"
+        # Kalimat pembuka "Tentu! Berikut hasilnya:" tidak ikut terbawa,
+        # dan hashtag tetap menempel di akhir deskripsi.
+        assert r["description"].startswith("Isi")
+        assert "Tentu" not in r["description"]
+        assert r["description"].endswith(ai_meta.hashtag_line(r["hashtags"]))
         assert r["partial"] is False
 
     def test_kotor_dibersihkan(self, ai_server):
@@ -416,3 +423,111 @@ class TestFriendlyUrlError:
         with pytest.raises(ai_meta.AiError) as e:
             gen(ai_server, "refusal")
         assert "tidak bisa membaca" in str(e.value).lower()
+
+# ------------------------------------------------------------------ hashtag
+
+class TestHashtag:
+    """Hashtag harus selalu ada karena itu bagian metadata yang dipakai."""
+
+    def test_dari_model_dipakai_apa_adanya(self, ai_server):
+        out = gen(ai_server, "hashtag")
+        assert out["hashtags"][:3] == ["#Fisika", "#Momentum", "#BelajarFisika"]
+
+    def test_kosong_dibuang(self, ai_server):
+        out = gen(ai_server, "hashtag")
+        assert "" not in out["hashtags"]
+        assert all(h.startswith("#") for h in out["hashtags"])
+
+    def test_model_lupa_hashtag_turunkan_dari_tag(self, ai_server):
+        out = gen(ai_server, "no_hashtag")
+        assert out["hashtags"], "hashtag tidak boleh kosong walau model tidak kirim"
+        assert all(h.startswith("#") for h in out["hashtags"])
+        # Turunan harus berasal dari tag yang ada, bukan mengarang. Tag
+        # ber-spasi dipotong jadi kata pertama karena hashtag YouTube
+        # tidak boleh mengandung spasi.
+        kata_pertama = {t.lower().split(" ", 1)[0] for t in out["tags"]}
+        for h in out["hashtags"]:
+            assert h.lstrip("#").lower() in kata_pertama
+
+    def test_tertempel_di_akhir_deskripsi(self, ai_server):
+        out = gen(ai_server, "hashtag")
+        baris = ai_meta.hashtag_line(out["hashtags"])
+        assert out["description"].rstrip().endswith(baris)
+
+    def test_bisa_dimatikan(self, ai_server):
+        out = gen(ai_server, "hashtag", options={"timeout": 60, "hashtags_in_description": False})
+        baris = ai_meta.hashtag_line(out["hashtags"])
+        assert baris and baris not in out["description"]
+        # Hashtag tetap ada sebagai field, cuma tidak menempel di deskripsi.
+        assert out["hashtags"]
+
+    def test_batas_15(self):
+        banyak = [f"#tag{i}" for i in range(40)]
+        assert len(ai_meta._clean_hashtags(banyak)) == 15
+
+    def test_tanpa_tanda_pOUNDtetap_dibalik(self):
+        assert ai_meta._clean_hashtags(["fisika", "#momentum"]) == ["#fisika", "#momentum"]
+
+    def test_spasi_di_dalam_dipisah(self):
+        # Hashtag YouTube tidak boleh berisi spasi, jadi satu item ber-spasi
+        # dipecah jadi dua hashtag, bukan dipotong diam-diam.
+        assert ai_meta._clean_hashtags(["#belajar fisika"]) == ["#belajar", "#fisika"]
+
+    def test_turunan_dari_tag_tidak_diperparuh(self):
+        # "belajar fisika" adalah satu istilah, bukan dua hashtag.
+        out = ai_meta._clean_hashtags(None, ["belajar fisika", "momentum"])
+        assert out == ["#belajar", "#momentum"]
+
+    def test_koma_dipisah(self):
+        assert ai_meta._clean_hashtags("#a, #b") == ["#a", "#b"]
+
+    def test_duplikat_diabaikan_case_insensitive(self):
+        assert ai_meta._clean_hashtags(["#Fisika", "#fisika", "#FISIKA"]) == ["#Fisika"]
+
+    def test_kosong_total_tidak_melempar(self):
+        assert ai_meta._clean_hashtags(["", "  ", "###"]) == []
+
+    def test_bukan_list_tidak_melempar(self):
+        assert ai_meta._clean_hashtags(123) == []
+        assert ai_meta._clean_hashtags(None) == []
+
+    def test_label_berantakan_dibersihkan(self):
+        assert ai_meta._clean_hashtags(['"hashtag: #musik"']) == ["#musik"]
+
+
+class TestAppendHashtags:
+    def test_deskripsi_kosong_jadi_hashtag_saja(self):
+        assert ai_meta.append_hashtags("", ["#a"]) == "#a"
+
+    def test_tidak_menggandakan(self):
+        assert ai_meta.append_hashtags("Halo #a", ["#a"]) == "Halo #a"
+
+    def test_tidak_menggandakan_sudah_ada_di_akhir(self):
+        desc = "Halo\n\n#a #b"
+        assert ai_meta.append_hashtags(desc, ["#a", "#b"]) == desc
+
+    def test_tetap_di_batas_youtube(self):
+        panjang = "x" * 4900
+        out = ai_meta.append_hashtags(panjang, ["#a", "#b"])
+        assert len(out) <= ai_meta.YOUTUBE_DESC_LIMIT
+        assert out.rstrip().endswith("#a #b")
+
+    def test_hashtag_bukan_yang_dibuang(self):
+        """Kalau tidak muat, deskripsi yang dipotong - hashtag tetap utuh."""
+        out = ai_meta.append_hashtags("y" * 4900, ["#kijekpanjangsekali"])
+        assert "#kijekpanjangsekali" in out
+        assert len(out) <= ai_meta.YOUTUBE_DESC_LIMIT
+
+    def test_tanpa_hashtag_tidak_berubah(self):
+        assert ai_meta.append_hashtags("Halo", []) == "Halo"
+        assert ai_meta.append_hashtags("Halo", None) == "Halo"
+
+    def test_limit_batas_terekal_kecil(self):
+        asli = ai_meta.YOUTUBE_DESC_LIMIT
+        ai_meta.YOUTUBE_DESC_LIMIT = 20
+        try:
+            out = ai_meta.append_hashtags("x" * 50, ["#a"])
+            assert len(out) <= 20
+            assert "#a" in out
+        finally:
+            ai_meta.YOUTUBE_DESC_LIMIT = asli
