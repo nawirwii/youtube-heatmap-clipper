@@ -695,8 +695,11 @@ def _clean_tags(value):
         t = re.sub(r"\s+", " ", t).strip(" .,:;|")
         if not t or len(t) > MAX_TRANSLIT_LEN:
             continue
-        # Buang tag yang cuma noise.
-        if not re.search(r"[a-z0-9]", t):
+        # Buang tag yang cuma noise (###, ---, dll). Aksara non-Latin
+        # SENGAJA TIDAK dibuang di sini: tag Mandarin dari model adalah bukti
+        # jawaban salah bahasa, dan kalau dibuang di sini, guard bahasa tidak
+        # pernah melihatnya. Guard yang melapor, bukan filter senyap.
+        if not re.search(r"[a-z0-9]", t) and not _OFF_SCRIPT.search(t):
             continue
         if t in seen:
             continue
@@ -748,7 +751,9 @@ def _clean_hashtags(value, fallback_tags=None):
             t = t.strip(" .,:;|#*_")
             if not t or len(t) > MAX_HASHTAG_LEN:
                 continue
-            if not re.search(r"[a-z0-9]", t.lower()):
+            # Sama seperti tag: aksara non-Latin dibiarkan lewat supaya
+            # guard bahasa bisa melaporkannya.
+            if not re.search(r"[a-z0-9]", t.lower()) and not _OFF_SCRIPT.search(t):
                 continue
             key = t.lower()
             if key in seen:
@@ -804,6 +809,126 @@ def append_hashtags(description, hashtags):
 
 def character_count(text):
     return len(text or "")
+
+
+# --------------------------------------------------------------------------
+# Deteksi bahasa nyasar
+# --------------------------------------------------------------------------
+# Model kecil (1-3B) kadang menjawab dalam bahasa yang salah, paling sering
+# Mandarin: tokenizer model-nya kuat ke arah sana, dan konteks Indonesia
+# yang tipis tidak cukup menahannya. Hasilnya tidak bisa dipakai user, tapi
+# tampilannya terlihat "sukses" - itu yang bikin bug ini lama tidak ketahuan.
+#
+# Sifat guard ini: DETEKSI, bukan diam-diam membuang. Isi yang sudah jadi
+# milik user tidak dihapus tanpa izin; yang berubah cuma penanda partial jadi
+# true supaya UI memberi tahu jawabannya meragukan, dan UI menampilkan
+# daftar temuannya supaya user bisa langsung melihat karakter yang tidak wajar.
+
+# CJK unified ideograph + kana + hangul. Fullwidth punctuation sengaja tidak
+# masuk: itu bentuk ASCII yang sering muncul di teks Latin, bukan penanda
+# bahasa lain.
+_OFF_SCRIPT = re.compile(
+    r"[\u3005\u3007\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
+    r"\u3040-\u30ff\uac00-\ud7af]"
+)
+# Emoji sengaja dikecualikan: emoji tidak membuat jawaban salah bahasa.
+_HANGUL = re.compile(r"[\uac00-\ud7af]")
+_KANA = re.compile(r"[\u3040-\u30ff]")
+_HAN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+
+
+def detect_off_script(text, threshold=0.02, min_chars=8):
+    """Deteksi karakter dari aksara non-Latin yang kemungkinan tidak disengaja.
+
+    Mengembalikan dict berisi rasio, jumlah, contoh, dan nama bahasa. Kalau
+    teksnya pendek, rasio kecil itu normal (misal satu kata Mandarin di judul
+    pendek), jadi ambang rasio dan jumlah karakter minimum ikut dihitung.
+    """
+    s = str(text or "")
+    if not s:
+        return None
+    found = _OFF_SCRIPT.findall(s)
+    if not found:
+        return None
+    # Emoji itu bawaan zaman sekarang, bukan tanda salah bahasa: buang dulu
+    # supaya emoji tidak dihitung sebagai karakter CJK.
+    for ch in s:
+        if _OFF_SCRIPT.fullmatch(ch) and ord(ch) > 0x1F000:
+            found = [c for c in found if c != ch]
+    if not found:
+        return None
+    # Rasio dihitung terhadap huruf+angka, bukan panjang mentah: spasi dan
+    # tanda baca bukan sinyal bahasa.
+    core = re.sub(r"[^0-9A-Za-z\u3005\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]", "", s)
+    if not core:
+        return None
+    ratio = len(found) / len(core)
+    if ratio < threshold and len(core) < min_chars:
+        return None
+    sample = "".join(dict.fromkeys(found))[:12]
+    gabung = "".join(found)
+    if _HANGUL.search(gabung):
+        nama = "Korea"
+    elif _KANA.search(gabung):
+        nama = "Jepang"
+    else:
+        # Han tanpa kana dan tanpa hangul. Namai sebagai script, bukan bahasa
+        # spesifik: Mandarin, CJK, dan Vietnam memakai Aksara Han yang sama,
+        # jadi tidak bisa dibedakan dari teks saja.
+        nama = "CJK/Han"
+    return {
+        "ratio": round(ratio, 4),
+        "count": len(found),
+        "sample": sample,
+        "script": nama,
+    }
+
+
+def audit_language(meta, options=None):
+    """Periksa hasil metadata untuk aksara yang tidak diminta.
+
+    Mengembalikan dict berisi 'ok', 'warnings' (list of dict per field), dan
+    'partial'. Sengaja TIDAK mengubah isi metadata: user berhak melihat apa
+    yang sebenarnya ditulis model, dan user bisa membetulkan sendiri.
+    """
+    options = options or {}
+    want_cjk = bool(options.get("allow_cjk"))
+    if want_cjk:
+        return {"ok": True, "warnings": [], "partial": False}
+    fields = ("titles", "description", "tags", "hashtags")
+    warnings = []
+    for name in fields:
+        val = meta.get(name)
+        if isinstance(val, list):
+            gabung = " ".join(str(v) for v in val)
+        else:
+            gabung = str(val or "")
+        det = detect_off_script(gabung)
+        if det:
+            warnings.append({"field": name, **det})
+    return {
+        "ok": not warnings,
+        "warnings": warnings,
+        "partial": bool(warnings) or bool(meta.get("partial")),
+    }
+
+
+def format_language_warning(audit, lang="Indonesian"):
+    """Kalimat singkat yang bisa langsung ditampilkan di UI."""
+    if audit.get("ok"):
+        return ""
+    parts = []
+    for w in audit.get("warnings", []):
+        parts.append(
+            f"{w['field']}: karakter {w['script']} ({w['sample']})"
+        )
+    return (
+        "Hasil metadata mengandung karakter di luar bahasa yang diminta: "
+        + "; ".join(parts)
+        + ". Model lokal biasanya perlu waktu lebih lama untuk menghasilkan output "
+        f"{lang} yang konsisten - coba model yang lebih besar, turunkan "
+        "suhu, atau tambahkan instruksi bahasa di kolom catatan."
+    )
 
 
 def youtube_limits():

@@ -271,6 +271,24 @@ def self_test(require_whisper=False):
             and len(ai_meta.hashtag_line(tanpa_desc["hashtags"])) > 0
             and len(tanpa_desc["description"]) <= ai_meta.YOUTUBE_DESC_LIMIT
         )
+        # Aksara lain harus terdeteksi dan DILAPORKAN, bukan dibuang diam-diam.
+        nyasar = ai_meta.parse_metadata(json.dumps({
+            "titles": ["Belajar Momentum", "\u7269\u7406 Momentum"],
+            "description": "Isi.\n\n- \u7b2c\u4e00\u5b9a\u5f8b",
+            "tags": ["momentum", "\u7269\u7406"],
+        }))
+        audit = ai_meta.audit_language(nyasar)
+        cek_bahasa = (
+            audit["ok"] is False
+            and audit["partial"] is True
+            and any(w["field"] == "tags" for w in audit["warnings"])
+            and any("\u7269\u7406" in t for t in nyasar["tags"])
+            and ai_meta.audit_language(
+                {"titles": ["Belajar Momentum"], "description": "Isi.",
+                 "tags": ["momentum"]}
+            )["ok"] is True
+        )
+
         # Konfigurasi AI harus benar-benar bisa ditulis dan dibaca kembali.
         cfg_path_uji = ai_config.config_path()
         ada_akhirnya = ai_config.save({"model": "qwen2.5:3b"}) and bool(
@@ -293,10 +311,10 @@ def self_test(require_whisper=False):
         )
         check(
             "logika AI metadata",
-            bool(parse_ai and bersih and cek_hashtag and cek_config
-                 and tolak_awan and terima_lokal),
+            bool(parse_ai and bersih and cek_hashtag and cek_bahasa
+                 and cek_config and tolak_awan and terima_lokal),
             f"parser rusak={parse_ai} bersih={bersih} "
-            f"hashtag={cek_hashtag} config={cek_config} "
+            f"hashtag={cek_hashtag} bahasa={cek_bahasa} config={cek_config} "
             f"tolak_awan={tolak_awan} terima_lokal={terima_lokal}",
         )
     except Exception as exc:

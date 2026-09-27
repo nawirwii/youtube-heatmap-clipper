@@ -88,6 +88,39 @@ MODES = {
         "description": "  Baris satu\n\n\n\n\n  Baris dua  ",
         "tags": ["#TagSatu", "tag satu", "TAG_DUA", "  tag_tiga  ", "12345", "  "],
     }, ensure_ascii=False)},
+    # Model kecil yang nyasar ke bahasa lain. Kasus nyata yang dilaporkan
+    # user: judul Indonesia tapi disisipkan Mandarin, dan tag Mandarin ikut
+    # terbawa. Hasilnya harus TERLIHAT, tapi ditandai tidak utuh.
+    "off_script": {"content": json.dumps({
+        "titles": ["Belajar Impuls dan Momentum",
+                   "\u7269\u7406\u52a0\u901f\u6f14\u793a Momentum",
+                   "Momentum explained"],
+        "description": "Pembahasan lengkap.\n\n"
+                       "- \u7b2c\u4e00\u5b9a\u5f8b\n- \u7b2c\u4e8c\u5b9a\u5f8b",
+        "tags": ["momentum", "\u7269\u7406", "fisika"],
+        "hashtags": ["#\u7269\u7406", "#Momentum"],
+    }, ensure_ascii=False)},
+    # Aksara Korea dan Jepang, untuk memastikan nama script benar.
+    "off_script_hangul": {"content": json.dumps({
+        "titles": ["\uc6b4\ub3d9\ub7c9 \uc18c\uba85", "Momentum explained"],
+        "description": "\uc124\uba85\uc785\ub2c8\ub2e4.",
+        "tags": ["momentum"],
+        "hashtags": ["#\uc6b0\ub3d9\ub7c9"],
+    }, ensure_ascii=False)},
+    "off_script_kana": {"content": json.dumps({
+        "titles": ["\u904b\u52d5\u91cf\u306e\u8aac\u660e", "Momentum explained"],
+        "description": "\u8aac\u660e\u3067\u3059\u3002",
+        "tags": ["momentum"],
+        "hashtags": ["#\u904b\u52d5\u91cf"],
+    }, ensure_ascii=False)},
+    # Jawaban bersih dengan emoji: emoji bukan tanda salah bahasa.
+    "emoji_ok": {"content": json.dumps({
+        "titles": ["Belajar Momentum \U0001f525", "Belajar Impuls",
+                   "Momentum explained", "Fisika SMA"],
+        "description": "Pembahasan.\n\n- Hukum I",
+        "tags": ["momentum", "fisika"],
+        "hashtags": ["#Fisika"],
+    }, ensure_ascii=False)},
     "empty": {"content": "{}"},
     "refusal": {"content": "Maaf, saya tidak bisa membantu permintaan ini."},
     "server_error": {"status": 500, "raw": '{"error": {"message": "model out of memory"}}'},

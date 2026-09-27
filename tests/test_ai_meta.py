@@ -531,3 +531,90 @@ class TestAppendHashtags:
             assert "#a" in out
         finally:
             ai_meta.YOUTUBE_DESC_LIMIT = asli
+
+
+# --------------------------------------------------------------------------
+# Guard bahasa: model kecil kadang menjawab dengan aksara lain
+# --------------------------------------------------------------------------
+
+class TestDeteksiAksaraLain:
+    def test_mandarin_terdeteksi(self):
+        d = ai_meta.detect_off_script("Belajar 中文 hari ini momentum")
+        assert d is not None
+        assert d["script"] == "CJK/Han"
+        assert "中" in d["sample"]
+
+    def test_hangul_terdeteksi_sebagai_korea(self):
+        d = ai_meta.detect_off_script("운동량 설명 momentum laws")
+        assert d is not None
+        assert d["script"] == "Korea"
+
+    def test_kana_terdeteksi_sebagai_jepang(self):
+        d = ai_meta.detect_off_script("運動量の説明 momentum laws")
+        assert d is not None
+        assert d["script"] == "Jepang"
+
+    def test_teks_latin_bersih_aman(self):
+        assert ai_meta.detect_off_script("Belajar Impuls dan Momentum") is None
+
+    def test_emoji_bukan_salah_bahasa(self):
+        assert ai_meta.detect_off_script("Belajar Momentum \U0001f525 hari ini") is None
+
+    def test_aksara_tidak_dibuang_dari_tag(self):
+        # Tag Mandarin harus TETAP ada supaya guard bisa melapor. Kalau
+        # dibuang di parser, penyimpannya hilang tanpa jejak.
+        tags = ai_meta._clean_tags(["momentum", "物理", "fisika"])
+        assert "物理" in tags
+        assert "momentum" in tags
+
+    def test_hashtag_aksara_asing_tetap_ada(self):
+        h = ai_meta._clean_hashtags(["#物理", "#Momentum"])
+        assert any("物" in x for x in h)
+
+
+class TestAuditBahasa:
+    def _meta(self):
+        return {
+            "titles": ["\u7269\u7406 Momentum explained", "Momentum explained"],
+            "description": "Pembahasan.\n\n- 第一定律",
+            "tags": ["momentum", "物理"],
+            "hashtags": ["#物理"],
+            "partial": False,
+        }
+
+    def test_mendeteksi_per_field(self):
+        a = ai_meta.audit_language(self._meta())
+        assert a["ok"] is False
+        assert a["partial"] is True
+        fields = {w["field"] for w in a["warnings"]}
+        assert {"titles", "description", "tags", "hashtags"} <= fields
+
+    def test_isi_hasil_tidak_diubah(self):
+        m = self._meta()
+        before = dict(m)
+        ai_meta.audit_language(m)
+        assert m["titles"] == before["titles"]
+        assert m["description"] == before["description"]
+        assert m["tags"] == before["tags"]
+
+    def test_hasil_bersih_ok(self):
+        m = {
+            "titles": ["Belajar Momentum", "Impuls dalam Fisika"],
+            "description": "Pembahasan lengkap.",
+            "tags": ["momentum", "fisika"],
+            "hashtags": ["#Fisika"],
+            "partial": False,
+        }
+        a = ai_meta.audit_language(m)
+        assert a["ok"] is True
+        assert a["partial"] is False
+
+    def test_allow_cjk_mematikan_guard(self):
+        a = ai_meta.audit_language(self._meta(), {"allow_cjk": True})
+        assert a["ok"] is True
+
+    def test_pesan_warning_bisa_dibaca(self):
+        msg = ai_meta.format_language_warning(ai_meta.audit_language(self._meta()))
+        assert msg
+        assert "CJK" in msg or "Korea" in msg or "Jepang" in msg
+        assert ai_meta.format_language_warning({"ok": True}) == ""

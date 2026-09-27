@@ -725,7 +725,22 @@ def api_ai_generate():
         }), 504
     if "error" in result:
         return jsonify({"ok": False, "error": result["error"]}), 502
-    return jsonify({"ok": True, "meta": result.get("data", {})})
+
+    meta = result.get("data", {})
+    # Guard bahasa: model kecil kadang menjawab dalam aksara yang tidak
+    # diminta. Isi jawaban TIDAK ikut diubah - user berhak melihat apa yang
+    # ditulis model - tapi status partial jadi true supaya UI menandai
+    # hasilnya perlu diperiksa, bukan menambah warning yang diabaikan.
+    audit = ai_meta.audit_language(meta, cfg["options"])
+    meta["partial"] = audit["partial"]
+    meta["language"] = {
+        "ok": audit["ok"],
+        "warnings": audit["warnings"],
+        "message": ai_meta.format_language_warning(
+            audit, "Indonesia" if cfg["options"].get("lang") == "id" else "Inggris"
+        ),
+    }
+    return jsonify({"ok": True, "meta": meta})
 
 
 @app.get("/clips/<job_id>/<path:filename>")

@@ -111,6 +111,7 @@ const I18N = {
     "js.ai.generating": "Model berpikir... di CPU ini bisa lama.",
     "js.ai.done": "Selesai dalam {sec} detik",
     "js.ai.partial": "Model menjawab tidak lengkap, hasil parsial tetap ditampilkan.",
+    "js.ai.lang_warn": "Ada karakter dari bahasa lain. Periksa sebelum dipakai.",
     "js.ai.copied": "Tersalin",
     "js.ai.copy_fail": "Gagal menyalin. Salin manual dari kotak ini.",
     "js.ai.transcript_added": "Transkrip dipakai sebagai konteks.",
@@ -244,6 +245,7 @@ const I18N = {
     "js.ai.generating": "Model is thinking... this can be slow on CPU.",
     "js.ai.done": "Finished in {sec}s",
     "js.ai.partial": "The model answered incompletely, partial results are shown.",
+    "js.ai.lang_warn": "Output contains characters from another language. Check before using.",
     "js.ai.copied": "Copied",
     "js.ai.copy_fail": "Copy failed. Copy manually from this box.",
     "js.ai.transcript_added": "Transcript will be used as context.",
@@ -866,6 +868,15 @@ async function aiGenerate() {
     const lengkap = meta.partial === false;
     aiSetStatus(t("js.ai.done", { sec }), lengkap ? "Ok" : "Err", "js.ai.done", { sec });
     if (!lengkap) aiSetHint(t("js.ai.partial"), "Err", "js.ai.partial");
+    // Model kecil kadang menjawab dengan aksara lain (Mandarin, Korea,
+    // Jepang). Isi jawaban tetap ditampilkan apa adanya - user yang
+    // menilai - tapi diberi tahu supaya tidak ikut ter-paste ke YouTube.
+    const langWarn = meta.language && meta.language.ok === false
+      ? meta.language.message : "";
+    if (langWarn) {
+      aiSetHint(langWarn, "Err", langWarn);
+      aiSetStatus(t("js.ai.lang_warn"), "Err", "js.ai.lang_warn");
+    }
   } catch (e) {
     aiSetHint(e.message, "Err");
     aiSetStatus("", "Err");
