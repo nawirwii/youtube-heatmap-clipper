@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>YouTube Heatmap Clipper</title>
-    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="stylesheet" href="/static/style.css?v={{ asset_v }}" />
   </head>
   <body>
     <div id="topProgressWrap" class="topProgressWrap hide" aria-hidden="true">
@@ -199,6 +199,97 @@
 
       <section class="panel">
         <div class="panelHead">
+          <div class="panelTitle" data-i18n="panel.ai">AI Metadata</div>
+          <div class="panelRight">
+            <div id="aiStatus" class="panelMeta"></div>
+          </div>
+        </div>
+
+        <div class="aiGrid">
+          <div class="row">
+            <label class="label" data-i18n="label.ai_base_url">AI server (base URL)</label>
+            <input id="aiBaseUrl" class="input" placeholder="http://localhost:11434/v1" />
+            <div class="help" data-i18n="help.ai_base_url">Ollama, LM Studio, atau llama.cpp server. Hanya alamat lokal/LAN yang boleh dipakai.</div>
+          </div>
+          <div class="row">
+            <label class="label" data-i18n="label.ai_model">Model</label>
+            <input id="aiModel" class="input" list="aiModelList" placeholder="qwen2.5:3b" />
+            <datalist id="aiModelList"></datalist>
+            <div class="help" data-i18n="help.ai_model">Tekan "Test" untuk ambil daftar model dari server.</div>
+          </div>
+          <div class="row">
+            <label class="label" data-i18n="label.ai_api_key">API key <span class="optional">(opsional)</span></label>
+            <input id="aiApiKey" class="input" type="password" autocomplete="off" />
+            <div class="help" data-i18n="help.ai_api_key">Cuma diisi kalau server lokalmu minta kunci. Disimpan di browser ini saja.</div>
+          </div>
+          <div class="row">
+            <label class="label" data-i18n="label.ai_tone">Gaya tulisan</label>
+            <select id="aiTone" class="input">
+              <option value="informative" data-i18n="opt.ai_tone.informative">Informatif</option>
+              <option value="casual" data-i18n="opt.ai_tone.casual">Santai</option>
+              <option value="energetic" data-i18n="opt.ai_tone.energetic">Energetik</option>
+              <option value="educational" data-i18n="opt.ai_tone.educational">Edukatif</option>
+            </select>
+            <div class="help" data-i18n="help.ai_tone">Nada bahasa judul &amp; deskripsi.</div>
+          </div>
+          <div class="row">
+            <label class="label" data-i18n="label.ai_timeout">Timeout (detik)</label>
+            <input id="aiTimeout" class="input" type="number" min="30" max="1800" step="30" value="600" />
+            <div class="help" data-i18n="help.ai_timeout">Model lokal di CPU bisa lambat. Naikkan kalau sering kehabisan waktu.</div>
+          </div>
+          <div class="row">
+            <label class="label" data-i18n="label.ai_note">Instruksi tambahan <span class="optional">(opsional)</span></label>
+            <input id="aiNote" class="input" maxlength="500" />
+            <div class="help" data-i18n="help.ai_note">Mis. &quot;fokus pemula&quot; atau &quot;sebut Tools&quot;.</div>
+          </div>
+          <div class="row aiRowWide">
+            <label class="label" data-i18n="label.ai_transcript">Transkrip <span class="optional">(opsional)</span></label>
+            <textarea id="aiTranscript" class="input aiTextarea" rows="3" maxlength="6000"></textarea>
+            <div class="help" data-i18n="help.ai_transcript">Tempel cuplikan transkrip (dari subtitle, .srt, atau catatan) supaya judul dan tag jauh lebih akurat.</div>
+          </div>
+        </div>
+
+        <div class="aiActions">
+          <button id="aiTestBtn" class="btn ghost" type="button" data-i18n="btn.ai_test">Test server</button>
+          <button id="aiUseTranscript" class="btn ghost" type="button" data-i18n="btn.ai_use_transcript">Pakai transkrip</button>
+          <button id="aiGenerateBtn" class="btn" type="button" data-i18n="btn.ai_generate">Generate metadata</button>
+        </div>
+        <div id="aiHint" class="aiHint"></div>
+
+        <div id="aiResult" class="aiResult hide">
+          <div class="aiField">
+            <div class="aiFieldHead">
+              <div class="label" data-i18n="label.ai_titles">Pilihan judul</div>
+              <button class="btn ghost smallBtn" type="button" data-copy="aiTitles" data-i18n="btn.copy">Copy</button>
+            </div>
+            <div id="aiTitles" class="aiTitles"></div>
+          </div>
+          <div class="aiField">
+            <div class="aiFieldHead">
+              <div class="label" data-i18n="label.ai_description">Deskripsi</div>
+              <div class="aiFieldActions">
+                <span id="aiDescCount" class="panelMeta"></span>
+                <button class="btn ghost smallBtn" type="button" data-copy="aiDescription" data-i18n="btn.copy">Copy</button>
+              </div>
+            </div>
+            <textarea id="aiDescription" class="input aiTextarea" rows="7"></textarea>
+          </div>
+          <div class="aiField">
+            <div class="aiFieldHead">
+              <div class="label" data-i18n="label.ai_tags">Tag</div>
+              <div class="aiFieldActions">
+                <span id="aiTagCount" class="panelMeta"></span>
+                <button class="btn ghost smallBtn" type="button" data-copy="aiTags" data-i18n="btn.copy_all">Copy all</button>
+              </div>
+            </div>
+            <div id="aiTags" class="aiTags"></div>
+            <textarea id="aiTagsRaw" class="input aiTextarea aiTagsRaw" rows="2"></textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panelHead">
           <div class="panelTitle" data-i18n="panel.progress">Progress</div>
           <div id="jobMeta" class="panelMeta"></div>
         </div>
@@ -218,6 +309,6 @@
       </div>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v={{ asset_v }}"></script>
   </body>
 </html>

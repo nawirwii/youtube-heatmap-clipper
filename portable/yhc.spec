@@ -58,6 +58,7 @@ WHISPER_PACKAGES = (
 hiddenimports = [
     "run",
     "webapp",
+    "ai_meta",
     "portable_runtime",
     "werkzeug.middleware.proxy_fix",
 ]

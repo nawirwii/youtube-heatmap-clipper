@@ -20,6 +20,7 @@ from flask import (
     send_from_directory,
 )
 
+import ai_meta
 import run as core
 from portable_runtime import bootstrap, data_dir, resource_dir, ytdlp_cmd
 
@@ -327,9 +328,25 @@ def run_job(job_id, payload):
         set_job(job_id, status="error", error=str(e), finished_at=now_ms())
 
 
+def asset_version():
+    """Token cache-buster untuk app.js dan style.css.
+
+    Tanpa ini, browser bisa tetap memakai JavaScript versi lama padahal
+    aplikasinya sudah diperbarui. Gejalanya: UI masih menampilkan fitur
+    yang sudah dihapus, atau tombol tidak merespons karena logika barunya
+    tidak ikut termuat. File aset dibaca dari disk tiap request, jadi token
+    cukup berupa ukuran dan waktu ubahnya.
+    """
+    try:
+        stat = os.stat(os.path.join(RES_DIR, "static", "app.js"))
+        return f"{int(stat.st_mtime)}-{stat.st_size}"
+    except OSError:
+        return "0"
+
+
 @app.get("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", asset_v=asset_version())
 
 @app.get("/assets/fonts/<path:filename>")
 def serve_font(filename):
@@ -366,6 +383,10 @@ def get_preview(url):
         "duration": item.get("duration"),
         "webpage_url": item.get("webpage_url") or key,
         "id": item.get("id"),
+        # Deskripsi asli dipakai sebagai konteks topik saat generate metadata.
+        # Dipotong karena deskripsi YouTube bisa ribuan karakter dan sebagian
+        # besar berisi boilerplate/link yang tidak membantu LLM.
+        "description": (item.get("description") or "")[:6000],
     }
 
     with preview_lock:
@@ -486,6 +507,166 @@ def api_job(job_id):
         if not job:
             return jsonify({"ok": False, "error": "Job not found"}), 404
         return jsonify({"ok": True, "job": job})
+
+
+# --------------------------------------------------------------------------
+# Metadata AI (judul, deskripsi, tag) lewat LLM lokal
+# --------------------------------------------------------------------------
+
+def format_duration_text(seconds):
+    """'PT3M33S' -> '3:33'. Dipakai sebagai konteks panjang video."""
+    try:
+        total = int(float(seconds))
+    except (TypeError, ValueError):
+        return ""
+    if total <= 0:
+        return ""
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def build_ai_context(payload):
+    """Kumpulkan semua bahan yang bisa dibaca LLM dari state yang sudah ada.
+
+    Sengaja memakai data yang sudah ada di memory, bukan memanggil yt-dlp lagi:
+    satu request tambahan berarti satu langkah lebih dekat ke rate limit, dan metadata video
+    sudah ada sejak preview.
+    """
+    url = (payload.get("url") or "").strip()
+    preview = {}
+    if url:
+        with preview_lock:
+            preview = preview_cache.get(url.strip()) or {}
+    segments = payload.get("segments")
+    if not isinstance(segments, list):
+        segments = []
+    return {
+        "title": preview.get("title") or payload.get("title") or "",
+        "channel": preview.get("uploader") or "",
+        "duration_text": format_duration_text(preview.get("duration")),
+        "description": preview.get("description") or "",
+        "transcript": payload.get("transcript") or "",
+        "segments": [s for s in segments if isinstance(s, dict)][:20],
+    }
+
+
+def _ai_settings(payload):
+    """Ambil + bersihkan pengaturan AI dari request."""
+    options = payload.get("options") or {}
+    if not isinstance(options, dict):
+        options = {}
+    return {
+        "base_url": payload.get("base_url"),
+        "model": (payload.get("model") or "").strip(),
+        "api_key": (payload.get("api_key") or "").strip(),
+        "options": options,
+    }
+
+
+@app.post("/api/ai/probe")
+def api_ai_probe():
+    """Cek apakah endpoint AI hidup dan modelnya benar-benar tersedia.
+
+    Ini sengaja dipisah dari generate: user perlu tahu cepat apakah Ollama-nya
+    jalan, tanpa menunggu satu generasi panjang.
+    """
+    payload = request.get_json(silent=True) or {}
+    cfg = _ai_settings(payload)
+    base_url = ai_meta.normalise_base_url(cfg["base_url"])
+    ok, why = ai_meta.validate_base_url(base_url)
+    if not ok:
+        return jsonify({"ok": False, "error": why}), 400
+
+    # Probe harusnya cepat dan gagal cepat juga. Timeout generous dipakai
+    # hanya untuk generate, bukan untuk cek koneksi.
+    probe_timeout = 8.0
+    try:
+        models = ai_meta.list_models(
+            base_url, timeout=probe_timeout, api_key=cfg["api_key"] or None
+        )
+    except Exception as e:  # noqa: BLE001 - pesan asli sangat membantu user
+        return jsonify({
+            "ok": False,
+            "error": ai_meta.friendly_url_error(e, base_url, probe_timeout),
+            "base_url": base_url,
+        }), 200
+
+    chosen = cfg["model"]
+    found = None
+    if chosen:
+        # Cocokkan longgar: beberapa server menulis "qwen2.5:3b-instruct"
+        # sementara user mengetik "qwen2.5:3b".
+        found = any(chosen == m or m.startswith(chosen) or chosen.startswith(m)
+                     for m in models) if models else None
+    return jsonify({
+        "ok": True,
+        "base_url": base_url,
+        "models": models,
+        "model_found": found,
+        "count": len(models),
+    })
+
+
+@app.post("/api/ai/generate")
+def api_ai_generate():
+    """Buat judul, deskripsi, dan tag dari topik video.
+
+    Dijalankan di thread supaya request tidak membekukan UI saat model lokal
+    berpikir beberapa menit.
+    """
+    payload = request.get_json(silent=True) or {}
+    cfg = _ai_settings(payload)
+    base_url = ai_meta.normalise_base_url(cfg["base_url"])
+    ok, why = ai_meta.validate_base_url(base_url)
+    if not ok:
+        return jsonify({"ok": False, "error": why}), 400
+    if not cfg["model"]:
+        return jsonify({"ok": False, "error": "Pilih model dulu di panel AI."}), 400
+
+    context = build_ai_context(payload)
+    if not context["title"] and not context["description"] and not context["transcript"]:
+        return jsonify({
+            "ok": False,
+            "error": (
+                "Belum ada info video untuk dianalisa. Tempel link YouTube dulu "
+                "dan tunggu preview muncul."
+            ),
+        }), 400
+
+    result = {}
+
+    def worker():
+        try:
+            result["data"] = ai_meta.generate(
+                base_url,
+                cfg["model"],
+                context,
+                options=cfg["options"],
+                api_key=cfg["api_key"] or None,
+            )
+        except Exception as e:  # noqa: BLE001
+            result["error"] = str(e) if isinstance(e, ai_meta.AiError) else (
+                f"Gagal membuat metadata: {type(e).__name__}: {e}"
+            )
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+    # Model lokal bisa sangat lambat; batas atas dibuat longgar karena user
+    # yang tahu modelnya. UI menampilkan progres meanwhile.
+    t.join(timeout=ai_meta.clamp_timeout(cfg["options"].get("timeout")))
+    if t.is_alive():
+        return jsonify({
+            "ok": False,
+            "error": (
+                ai_meta.friendly_timeout_error(
+                    ai_meta.clamp_timeout(cfg["options"].get("timeout")), cfg["model"]
+                )
+            ),
+        }), 504
+    if "error" in result:
+        return jsonify({"ok": False, "error": result["error"]}), 502
+    return jsonify({"ok": True, "meta": result.get("data", {})})
 
 
 @app.get("/clips/<job_id>/<path:filename>")

@@ -3,3 +3,5 @@
 # hanya berisi dependency runtime.
 pyinstaller>=6.6,<7
 faster-whisper>=1.0.0
+# Dipakai CI untuk menjalankan seluruh test suite (tests/).
+pytest>=8.0

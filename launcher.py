@@ -201,6 +201,64 @@ def self_test(require_whisper=False):
     except Exception as exc:
         check("parser heatmap", False, str(exc))
 
+    # Logika AI metadata juga harus ter-prove di dalam paket: kalau modulnya
+    # tidak ikut ter-bundle, gejalanya baru muncul saat user menekan tombol.
+    try:
+        import ai_meta
+
+        # Parser harus tetap menerima JSON rusak yang masih bisa diselamatkan,
+        # dan newline ter-escape harus jadi baris baru sungguhan.
+        rusak = (
+            '{"titles": ["Satu", "Dua"], "description": "Isi\\n\\nparagraf dua", '
+            '"tags": ["TagSatu", "tag-satu", "#Dua"]'
+        )
+        pulih = ai_meta.parse_metadata(rusak)
+        rapi = ai_meta.parse_metadata(json.dumps({
+            "titles": [" Judul Bersih ", "1. Judul Kembar"],
+            "description": "Baris satu\\n\\n\\n\\nBaris dua",
+            "tags": ["Fisika", "#FISIKA", "  momentum  "],
+        }))
+        # Tanpa satu field sama sekali: hasilnya harus ditandai parsial,
+        # bukan diam-diam dipakai seolah lengkap.
+        kurang = ai_meta.parse_metadata('{"titles": ["Satu"], "description": "Isi"}')
+
+        parse_ai = (
+            len(pulih["titles"]) == 2
+            and "\n" in pulih["description"]
+            and "\\n" not in pulih["description"]
+            and len(pulih["tags"]) == 3
+            and pulih["partial"] is False
+            and kurang["partial"] is True
+            and not kurang["tags"]
+        )
+        bersih = (
+            rapi["titles"] == ["Judul Bersih", "Judul Kembar"]
+            and rapi["description"].count("\n\n") == 1
+            and rapi["tags"] == ["fisika", "momentum"]
+            and rapi["partial"] is False
+        )
+
+        # Alamat awan harus ditolak, dan penolakan tidak boleh bergantung pada
+        # DNS: kalau DNS gagal, host awan tidak boleh dianggap lokal.
+        tolak_awan = all(
+            not ai_meta.validate_base_url(u)[0]
+            for u in ("https://api.openai.com/v1", "https://tidak-ada-host.invalid/v1",
+                      "http://8.8.8.8:11434/v1")
+        )
+        terima_lokal = all(
+            ai_meta.validate_base_url(u)[0]
+            for u in ("http://localhost:11434/v1", "http://127.0.0.1:1234/v1",
+                      "http://192.168.1.5:8080/v1", "http://my-pc/v1")
+        )
+        check(
+            "logika AI metadata",
+            bool(parse_ai and bersih and tolak_awan and terima_lokal),
+            f"parser rusak={parse_ai} bersih={bersih} "
+            f"tolak_awan={tolak_awan} terima_lokal={terima_lokal}",
+        )
+    except Exception as exc:
+        check("logika AI metadata", False, str(exc))
+
     lines.append("")
     if failures:
         lines.append(f"GAGAL: {len(failures)} cek tidak lulus -> {', '.join(failures)}")

@@ -55,6 +55,15 @@ This is the web version of the original project: https://github.com/0xACAB666/yt
   - Font selection (Plus Jakarta Sans, Roboto, Montserrat, Arial, or Custom)
   - Subtitle positioning (Bottom or Centered)
   - Custom fonts directory support
+- **AI Metadata Panel**: generate titles, descriptions, and tags from the video
+  topic using a local LLM (Ollama / LM Studio / llama.cpp / KoboldCpp / LocalAI)
+  - Any server with an OpenAI-compatible API works; local and LAN addresses only
+  - Context comes from the YouTube link, or paste your own transcript excerpt
+  - Results can be copied per field or downloaded; nothing is uploaded anywhere
+  - Output is bounded for reuse: titles 130 chars, descriptions 5000 chars, tags
+    30 tags x 500 chars (YouTube Studio limits)
+- Indonesian/English UI, and HTML assets carry a version cache-buster so the
+  browser never keeps running old JavaScript after an update
 
 ## Requirements
 

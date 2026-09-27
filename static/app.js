@@ -74,6 +74,51 @@ const I18N = {
     "js.stage.finalize": "Finalize",
     "js.stage.done_clip": "Selesai",
     "js.topprogress.processing": "Processing",
+    "panel.ai": "AI Metadata",
+    "label.ai_base_url": "AI server (base URL)",
+    "help.ai_base_url": "Ollama, LM Studio, atau llama.cpp server. Hanya alamat lokal atau jaringan LAN yang boleh dipakai.",
+    "label.ai_model": "Model",
+    "help.ai_model": "Tekan Test server buat ambil daftar model yang tersedia.",
+    "label.ai_api_key": "API key (opsional)",
+    "help.ai_api_key": "Cuma diisi kalau server lokalmu minta kunci. Disimpan di browser ini saja.",
+    "label.ai_tone": "Gaya tulisan",
+    "opt.ai_tone.informative": "Informatif",
+    "opt.ai_tone.casual": "Santai",
+    "opt.ai_tone.energetic": "Energetik",
+    "opt.ai_tone.educational": "Edukatif",
+    "help.ai_tone": "Nada bahasa judul dan deskripsi.",
+    "label.ai_timeout": "Timeout (detik)",
+    "help.ai_timeout": "Model lokal di CPU bisa lambat. Naikkan kalau sering kehabisan waktu.",
+    "label.ai_note": "Instruksi tambahan (opsional)",
+    "help.ai_note": "Misalnya: fokus pemula, atau sebut Tools yang dipakai.",
+    "label.ai_transcript": "Transkrip (opsional)",
+    "help.ai_transcript": "Tempel cuplikan transkrip (dari subtitle, .srt, atau catatan) supaya judul dan tag jauh lebih akurat.",
+    "label.ai_titles": "Pilihan judul",
+    "label.ai_description": "Deskripsi",
+    "label.ai_tags": "Tag",
+    "btn.ai_test": "Test server",
+    "btn.ai_use_transcript": "Pakai transkrip",
+    "btn.ai_generate": "Generate metadata",
+    "btn.copy": "Salin",
+    "btn.copy_all": "Salin semua",
+    "js.ai.ready": "Siap",
+    "js.ai.no_model": "Isi base URL lalu pilih model dulu.",
+    "js.ai.need_video": "Tempel link YouTube dulu supaya AI tahu topiknya.",
+    "js.ai.testing": "Menghubungi server AI...",
+    "js.ai.test_ok": "Server hidup, {count} model tersedia",
+    "js.ai.test_ok_empty": "Server hidup, tapi daftar model kosong. Isi nama model manual.",
+    "js.ai.model_missing": "Server hidup, tapi model {model} tidak ada di daftarnya.",
+    "js.ai.generating": "Model berpikir... di CPU ini bisa lama.",
+    "js.ai.done": "Selesai dalam {sec} detik",
+    "js.ai.partial": "Model menjawab tidak lengkap, hasil parsial tetap ditampilkan.",
+    "js.ai.copied": "Tersalin",
+    "js.ai.copy_fail": "Gagal menyalin. Salin manual dari kotak ini.",
+    "js.ai.transcript_added": "Transkrip dipakai sebagai konteks.",
+    "js.ai.transcript_none": "Kotak transkrip masih kosong. Tempel cuplikan transkrip dulu.",
+    "js.ai.tr_title": "Judul hasil generate",
+    "js.ai.desc_empty": "(model tidak memberi judul)",
+    "js.ai.tags_empty": "(model tidak memberi tag)",
+    "js.ai.busy": "Still jalan...",
   },
   en: {
     "top.tagline": "Scan Most Replayed, auto cut, clean subtitles.",
@@ -148,6 +193,51 @@ const I18N = {
     "js.stage.finalize": "Finalize",
     "js.stage.done_clip": "Done",
     "js.topprogress.processing": "Processing",
+    "panel.ai": "AI Metadata",
+    "label.ai_base_url": "AI server (base URL)",
+    "help.ai_base_url": "Ollama, LM Studio, or a llama.cpp server. Only local or LAN addresses are allowed.",
+    "label.ai_model": "Model",
+    "help.ai_model": "Press Test server to fetch the list of available models.",
+    "label.ai_api_key": "API key (optional)",
+    "help.ai_api_key": "Only needed if your local server requires one. Stored in this browser only.",
+    "label.ai_tone": "Writing tone",
+    "opt.ai_tone.informative": "Informative",
+    "opt.ai_tone.casual": "Casual",
+    "opt.ai_tone.energetic": "Energetic",
+    "opt.ai_tone.educational": "Educational",
+    "help.ai_tone": "The language style used for the title and description.",
+    "label.ai_timeout": "Timeout (seconds)",
+    "help.ai_timeout": "Local models on CPU can be slow. Raise this if requests keep timing out.",
+    "label.ai_note": "Extra instruction (optional)",
+    "help.ai_note": "For example: aimed at beginners, or mention the tools used.",
+    "label.ai_transcript": "Transcript (optional)",
+    "help.ai_transcript": "Paste a transcript excerpt (from subtitles, an .srt, or your notes) so titles and tags are far more accurate.",
+    "label.ai_titles": "Title options",
+    "label.ai_description": "Description",
+    "label.ai_tags": "Tags",
+    "btn.ai_test": "Test server",
+    "btn.ai_use_transcript": "Use transcript",
+    "btn.ai_generate": "Generate metadata",
+    "btn.copy": "Copy",
+    "btn.copy_all": "Copy all",
+    "js.ai.ready": "Ready",
+    "js.ai.no_model": "Fill in the base URL and pick a model first.",
+    "js.ai.need_video": "Paste a YouTube link first so the AI knows the topic.",
+    "js.ai.testing": "Contacting AI server...",
+    "js.ai.test_ok": "Server is up, {count} model(s) available",
+    "js.ai.test_ok_empty": "Server is up, but the model list is empty. Type the model name manually.",
+    "js.ai.model_missing": "Server is up, but model {model} is not in its list.",
+    "js.ai.generating": "Model is thinking... this can be slow on CPU.",
+    "js.ai.done": "Finished in {sec}s",
+    "js.ai.partial": "The model answered incompletely, partial results are shown.",
+    "js.ai.copied": "Copied",
+    "js.ai.copy_fail": "Copy failed. Copy manually from this box.",
+    "js.ai.transcript_added": "Transcript will be used as context.",
+    "js.ai.transcript_none": "The transcript box is empty. Paste a transcript excerpt first.",
+    "js.ai.tr_title": "Generated title",
+    "js.ai.desc_empty": "(model returned no title)",
+    "js.ai.tags_empty": "(model returned no tags)",
+    "js.ai.busy": "Still running...",
   },
 };
 
@@ -307,6 +397,7 @@ function setLang(lang) {
   applyI18n();
   renderSegments(lastScanSegments);
   updateSelectedUi();
+  if (typeof aiRetranslate === "function") aiRetranslate();
 }
 
 function fmtTime(s) {
@@ -329,6 +420,317 @@ async function postJson(url, body) {
     throw new Error(data.error || `HTTP ${res.status}`);
   }
   return data;
+}
+
+
+// ---------------------------------------------------------------------------
+// Panel AI Metadata (judul, deskripsi, tag) lewat LLM lokal
+// ---------------------------------------------------------------------------
+
+const AI_LS_KEY = "yhc.ai.settings";
+let aiBusy = false;
+let aiMetaData = { titles: [], description: "", tags: [] };
+let aiTranscript = "";
+
+function aiLoadSettings() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(AI_LS_KEY) || "{}");
+    return raw && typeof raw === "object" ? raw : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function aiSaveSettings() {
+  const payload = {
+    base_url: $("aiBaseUrl").value.trim(),
+    model: $("aiModel").value.trim(),
+    api_key: $("aiApiKey").value,
+    tone: $("aiTone").value,
+    timeout: Number($("aiTimeout").value) || 600,
+    note: $("aiNote").value.trim(),
+  };
+  try {
+    localStorage.setItem(AI_LS_KEY, JSON.stringify(payload));
+  } catch (e) {
+    // Penyimpanan penuh atau ditolak browser: bukan kondisi fatal.
+  }
+  return payload;
+}
+
+function aiRestoreSettings() {
+  const s = aiLoadSettings();
+  $("aiBaseUrl").value = s.base_url || "";
+  $("aiModel").value = s.model || "";
+  $("aiApiKey").value = s.api_key || "";
+  $("aiNote").value = s.note || "";
+  $("aiTimeout").value = s.timeout || 600;
+  if (s.tone) $("aiTone").value = s.tone;
+}
+
+// Teks status dan hint disimpan sebagai kunci i18n juga, supayaPergantian
+// bahasa di tengah sesi tidak meninggalkan panel dalam bahasa lama.
+let aiStatusKey = "";
+let aiStatusVars = null;
+let aiStatusKind = "";
+let aiHintKey = "";
+let aiHintVars = null;
+let aiHintKind = "";
+
+function aiSetStatus(text, kind, key, vars) {
+  aiStatusKey = key || "";
+  aiStatusVars = vars || null;
+  aiStatusKind = kind || "";
+  const el = $("aiStatus");
+  el.textContent = text || "";
+  el.classList.remove("isOk", "isErr", "isBusy");
+  if (kind) el.classList.add("is" + kind);
+}
+
+function aiSetHint(text, kind, key, vars) {
+  aiHintKey = key || "";
+  aiHintVars = vars || null;
+  aiHintKind = kind || "";
+  const el = $("aiHint");
+  el.textContent = text || "";
+  el.classList.remove("isOk", "isErr", "isBusy", "aiHintShow");
+  if (text) el.classList.add("aiHintShow");
+  if (kind) el.classList.add("is" + kind);
+}
+
+function aiRetranslate() {
+  if (aiStatusKey) aiSetStatus(t(aiStatusKey, aiStatusVars), aiStatusKind, aiStatusKey, aiStatusVars);
+  if (aiHintKey) aiSetHint(t(aiHintKey, aiHintVars), aiHintKind, aiHintKey, aiHintVars);
+  if (aiMetaData.titles.length || aiMetaData.tags.length) aiRenderResult(aiMetaData);
+  aiSetBusy(aiBusy);
+}
+
+function aiSetBusy(on, label) {
+  aiBusy = !!on;
+  $("aiGenerateBtn").disabled = aiBusy;
+  $("aiTestBtn").disabled = aiBusy;
+  $("aiUseTranscript").disabled = aiBusy;
+  $("aiGenerateBtn").textContent = aiBusy
+    ? t("js.ai.busy")
+    : t("btn.ai_generate");
+  if (on) aiSetStatus(label || t("js.ai.generating"), "Busy", "js.ai.generating");
+}
+
+function aiCollectPayload() {
+  const s = aiSaveSettings();
+  return {
+    base_url: s.base_url,
+    model: s.model,
+    api_key: s.api_key,
+    url: $("url").value.trim(),
+    segments: (lastScanSegments || []).map((seg) => ({
+      label: seg.label || "",
+      score: seg.score ?? null,
+    })),
+    transcript: aiTranscript,
+    options: {
+      lang: currentLang,
+      tone: s.tone,
+      note: s.note,
+      timeout: s.timeout,
+      n_titles: 3,
+    },
+  };
+}
+
+function aiFillModelList(models) {
+  const list = $("aiModelList");
+  list.innerHTML = "";
+  (models || []).forEach((m) => {
+    const opt = document.createElement("option");
+    opt.value = m;
+    list.appendChild(opt);
+  });
+}
+
+function aiRenderResult(meta) {
+  aiMetaData = {
+    titles: Array.isArray(meta.titles) ? meta.titles : [],
+    description: meta.description || "",
+    tags: Array.isArray(meta.tags) ? meta.tags : [],
+  };
+
+  const box = $("aiTitles");
+  box.innerHTML = "";
+  if (aiMetaData.titles.length) {
+    aiMetaData.titles.forEach((title, i) => {
+      const row = document.createElement("div");
+      row.className = "aiTitleRow";
+      const label = document.createElement("span");
+      label.className = "aiTitleLabel";
+      label.textContent = t("js.ai.tr_title") + " " + (i + 1);
+      const val = document.createElement("span");
+      val.className = "aiTitleText";
+      val.textContent = title;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn ghost smallBtn";
+      btn.textContent = t("btn.copy");
+      btn.addEventListener("click", () => aiCopy(title, btn));
+      row.append(label, val, btn);
+      box.appendChild(row);
+    });
+  } else {
+    box.innerHTML = '<div class="aiEmpty">' + t("js.ai.desc_empty") + "</div>";
+  }
+
+  $("aiDescription").value = aiMetaData.description || "";
+
+  const tagBox = $("aiTags");
+  tagBox.innerHTML = "";
+  if (aiMetaData.tags.length) {
+    aiMetaData.tags.forEach((tag) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "aiTag";
+      chip.textContent = tag;
+      chip.title = t("btn.copy");
+      chip.addEventListener("click", () => aiCopy(tag, chip));
+      tagBox.appendChild(chip);
+    });
+  } else {
+    tagBox.innerHTML = '<div class="aiEmpty">' + t("js.ai.tags_empty") + "</div>";
+  }
+  $("aiTagsRaw").value = aiMetaData.tags.join(", ");
+
+  $("aiDescCount").textContent = aiMetaData.description.length + " / 5000";
+  const tagChars = aiMetaData.tags.reduce((a, b) => a + b.length + 1, 0);
+  $("aiTagCount").textContent =
+    aiMetaData.tags.length + " / 30" + (tagChars ? " · " + tagChars + " / 500" : "");
+
+  $("aiResult").classList.remove("hide");
+}
+
+function aiRenderIdle() {
+  aiMetaData = { titles: [], description: "", tags: [] };
+  $("aiTitles").innerHTML = "";
+  $("aiTags").innerHTML = "";
+  $("aiTagsRaw").value = "";
+  $("aiDescription").value = "";
+  $("aiDescCount").textContent = "";
+  $("aiTagCount").textContent = "";
+  $("aiResult").classList.add("hide");
+}
+
+async function aiCopy(text, btn) {
+  const original = btn ? btn.textContent : "";
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      // Fallback untuk konteks non-HTTPS (app lokal dibuka lewat LAN/file).
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      if (!ok) throw new Error("execCommand gagal");
+    }
+    if (btn) {
+      btn.textContent = t("js.ai.copied");
+      setTimeout(() => {
+        btn.textContent = original;
+      }, 1200);
+    }
+    aiSetHint(t("js.ai.copied"), "Ok", "js.ai.copied");
+    setTimeout(() => aiSetHint(""), 2000);
+  } catch (e) {
+    aiSetHint(t("js.ai.copy_fail"), "Err", "js.ai.copy_fail");
+  }
+}
+
+function aiTitlesAsText() {
+  return aiMetaData.titles.join("\n");
+}
+
+function aiTagsAsText() {
+  return aiMetaData.tags.join(", ");
+}
+
+async function aiTestServer() {
+  if (aiBusy) return;
+  const s = aiSaveSettings();
+  if (!s.base_url || !s.model) {
+    aiSetHint(t("js.ai.no_model"), "Err", "js.ai.no_model");
+    return;
+  }
+  aiSetBusy(true, t("js.ai.testing"));
+  aiSetHint("");
+  try {
+    const data = await postJson("/api/ai/probe", {
+      base_url: s.base_url,
+      model: s.model,
+      api_key: s.api_key,
+      options: { timeout: 20 },
+    });
+    aiFillModelList(data.models);
+    if (data.model_found === false) {
+      aiSetHint(t("js.ai.model_missing", { model: s.model }), "Err", "js.ai.model_missing", { model: s.model });
+      aiSetStatus(t("js.ai.test_ok", { count: data.count || 0 }), "Err", "js.ai.test_ok", { count: data.count || 0 });
+    } else if (!data.models || !data.models.length) {
+      aiSetHint(t("js.ai.test_ok_empty"), "Ok", "js.ai.test_ok_empty");
+      aiSetStatus(t("js.ai.test_ok", { count: 0 }), "Ok", "js.ai.test_ok", { count: 0 });
+    } else {
+      aiSetHint("");
+      aiSetStatus(t("js.ai.test_ok", { count: data.count }), "Ok", "js.ai.test_ok", { count: data.count });
+    }
+  } catch (e) {
+    aiSetHint(e.message, "Err");
+    aiSetStatus("", "Err");
+  } finally {
+    aiSetBusy(false);
+  }
+}
+
+async function aiGenerate() {
+  if (aiBusy) return;
+  const s = aiSaveSettings();
+  if (!s.base_url || !s.model) {
+    aiSetHint(t("js.ai.no_model"), "Err", "js.ai.no_model");
+    return;
+  }
+  // Konteks bisa datang dari link YouTube ATAU dari transkrip yang diketik
+  // sendiri. Jangan lebih ketat dari server: user yang sudah menempel
+  // transkrip tetap berhak generate.
+  if (!currentPreview && !$("url").value.trim() && !aiTranscript) {
+    aiSetHint(t("js.ai.need_video"), "Err", "js.ai.need_video");
+    return;
+  }
+  aiSetBusy(true, t("js.ai.generating"));
+  aiSetHint("");
+  try {
+    const data = await postJson("/api/ai/generate", aiCollectPayload());
+    const meta = data.meta || {};
+    aiRenderResult(meta);
+    const sec = meta.elapsed || 0;
+    const lengkap = meta.partial === false;
+    aiSetStatus(t("js.ai.done", { sec }), lengkap ? "Ok" : "Err", "js.ai.done", { sec });
+    if (!lengkap) aiSetHint(t("js.ai.partial"), "Err", "js.ai.partial");
+  } catch (e) {
+    aiSetHint(e.message, "Err");
+    aiSetStatus("", "Err");
+  } finally {
+    aiSetBusy(false);
+  }
+}
+
+function aiReadTranscriptBox() {
+  const el = $("aiTranscript");
+  const text = (el ? el.value : "").trim();
+  if (!text) {
+    aiSetHint(t("js.ai.transcript_none"), "Err", "js.ai.transcript_none");
+    return;
+  }
+  aiTranscript = text.slice(0, 6000);
+  aiSetHint(t("js.ai.transcript_added"), "Ok", "js.ai.transcript_added");
 }
 
 function openModal(title, bodyEl) {
@@ -707,6 +1109,24 @@ $("segSelectAllBtn").addEventListener("click", selectAllSegments);
 $("segClearBtn").addEventListener("click", clearSelectedSegments);
 $("segCreateBtn").addEventListener("click", clipSelected);
 $("modalClose").addEventListener("click", closeModal);
+$("aiTestBtn").addEventListener("click", aiTestServer);
+$("aiGenerateBtn").addEventListener("click", aiGenerate);
+$("aiUseTranscript").addEventListener("click", aiReadTranscriptBox);
+["aiBaseUrl", "aiModel", "aiTone", "aiTimeout", "aiNote"].forEach((id) => {
+  $(id)?.addEventListener("change", () => { aiSaveSettings(); aiSetStatus(""); });
+});
+document.querySelectorAll("[data-copy]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const src = btn.dataset.copy;
+    const text = src === "aiTitles"
+      ? aiTitlesAsText()
+      : src === "aiDescription"
+        ? ($("aiDescription").value || "")
+        : aiTagsAsText();
+    aiCopy(text, btn);
+  });
+});
+
 $("modalBackdrop").addEventListener("click", closeModal);
 $("langId")?.addEventListener("click", () => setLang("id"));
 $("langEn")?.addEventListener("click", () => setLang("en"));
@@ -720,3 +1140,5 @@ applyI18n();
 toggleMode();
 toggleFont();
 renderSegments([]);
+aiRestoreSettings();
+aiRenderIdle();
