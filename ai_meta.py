@@ -73,8 +73,8 @@ def validate_base_url(url):
     """True kalau URL aman dan masuk akal untuk dipakai client lokal.
 
     Sengaja hanya menerima loopback + LAN. Model lokal tidak ada di internet,
-    jadi menolak public host mencegah userIMER mengetik base URL awan dan
-   .Registry=kirim isi video ke sana tanpa sadar.
+    jadi menolak public host mencegah user mengetik base URL awan dan
+    mengirim isi video ke sana tanpa sadar.
     """
     if not url:
         return False, "Base URL kosong"
@@ -406,7 +406,7 @@ def strip_fences(text):
 
 
 def _balanced_object(text, start):
-    """Ambil satu objek JSON dimulai di index tertentu,Published menghitung
+    """Ambil satu objek JSON dimulai di index tertentu, menghitung
     kurung kurawal dan mengabaikan yang di dalam string."""
     depth = 0
     in_str = False
