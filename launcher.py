@@ -271,22 +271,19 @@ def self_test(require_whisper=False):
             and len(ai_meta.hashtag_line(tanpa_desc["hashtags"])) > 0
             and len(tanpa_desc["description"]) <= ai_meta.YOUTUBE_DESC_LIMIT
         )
-        # Aksara lain harus terdeteksi dan DILAPORKAN, bukan dibuang diam-diam.
+        # Aksara lain harus dihapus dari output akhir dan ditandai partial.
         nyasar = ai_meta.parse_metadata(json.dumps({
             "titles": ["Belajar Momentum", "\u7269\u7406 Momentum"],
             "description": "Isi.\n\n- \u7b2c\u4e00\u5b9a\u5f8b",
             "tags": ["momentum", "\u7269\u7406"],
         }))
-        audit = ai_meta.audit_language(nyasar)
+        teks_nyasar = json.dumps(nyasar, ensure_ascii=False)
         cek_bahasa = (
-            audit["ok"] is False
-            and audit["partial"] is True
-            and any(w["field"] == "tags" for w in audit["warnings"])
-            and any("\u7269\u7406" in t for t in nyasar["tags"])
-            and ai_meta.audit_language(
-                {"titles": ["Belajar Momentum"], "description": "Isi.",
-                 "tags": ["momentum"]}
-            )["ok"] is True
+            nyasar["partial"] is True
+            and not ai_meta._OFF_SCRIPT.search(teks_nyasar)
+            and nyasar["titles"] == ["Belajar Momentum", "Momentum"]
+            and nyasar["tags"] == ["momentum"]
+            and ai_meta.audit_language(nyasar)["ok"] is True
         )
 
         # Konfigurasi AI harus benar-benar bisa ditulis dan dibaca kembali.

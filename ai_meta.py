@@ -158,6 +158,12 @@ def build_prompt(context, options=None):
         "",
         f"Output language: {lang}.",
         f"Writing tone: {tone}.",
+        "STRICT SCRIPT RULE: write only in the requested language using Latin "
+        "letters (A-Z), digits, normal spaces, and ordinary punctuation.",
+        "NEVER output Chinese, Mandarin, Han/CJK characters, Japanese kana, "
+        "Japanese kanji, Korean Hangul, or any other non-Latin script.",
+        "If you cannot express a word safely in the requested language, use a "
+        "simple Latin alternative or omit it. Do not translate into Chinese.",
         "",
         "Required JSON shape:",
         '{"titles": ["..."], "description": "...", "tags": ["..."], '
@@ -453,6 +459,13 @@ def parse_metadata(text, options=None):
             f"Awal jawaban: {body[:250]}"
         )
 
+    # Kebijakan aplikasi: karakter Han/CJK, kana, dan hangul tidak boleh
+    # pernah sampai ke hasil yang ditampilkan. Bersihkan sebelum normalisasi
+    # tag/hashtag agar fallback hashtag juga tidak menghidupkan ulang kata
+    # Mandarin yang sudah dibuang.
+    had_forbidden_script = _contains_forbidden_scripts(data)
+    data = _remove_forbidden_scripts(data)
+
     titles = _clean_titles(data.get("titles") or data.get("title"))
     description = _clean_desc(data.get("description") or data.get("desc"))
     tags = _clean_tags(data.get("tags") or data.get("keywords"))
@@ -475,7 +488,7 @@ def parse_metadata(text, options=None):
         "description": description,
         "tags": tags,
         "hashtags": hashtags,
-        "partial": not (titles and description and tags),
+        "partial": bool(had_forbidden_script) or not (titles and description and tags),
     }
 
 
@@ -831,7 +844,41 @@ _OFF_SCRIPT = re.compile(
     r"[\u3005\u3007\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
     r"\u3040-\u30ff\uac00-\ud7af]"
 )
-# Emoji sengaja dikecualikan: emoji tidak membuat jawaban salah bahasa.
+# Karakter kontrol dibuang; newline/tab tetap dipertahankan untuk deskripsi.
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _remove_forbidden_scripts(value):
+    """Hapus aksara non-Latin dari struktur JSON metadata secara rekursif.
+
+    Ini adalah kebijakan output aplikasi: user meminta tidak pernah ada kata
+    atau huruf Mandarin/Cina/Tiongkok. Teks tidak dibuat kosong total; kalau
+    sebuah string hanya berisi aksara terlarang, string itu menjadi kosong dan
+    normalisasi berikutnya menandainya sebagai field kosong.
+    """
+    if isinstance(value, str):
+        value = _OFF_SCRIPT.sub("", value)
+        return _CONTROL_CHARS.sub("", value)
+    if isinstance(value, list):
+        return [_remove_forbidden_scripts(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _remove_forbidden_scripts(item) for key, item in value.items()}
+    return value
+
+
+def _contains_forbidden_scripts(value):
+    """True jika struktur hasil model mengandung aksara yang harus dibuang."""
+    if isinstance(value, str):
+        return bool(_OFF_SCRIPT.search(value))
+    if isinstance(value, list):
+        return any(_contains_forbidden_scripts(item) for item in value)
+    if isinstance(value, dict):
+        return any(_contains_forbidden_scripts(item) for item in value.values())
+    return False
+
+
+# --------------------------------------------------------------------------
+# Deteksi bahasa nyasar
 _HANGUL = re.compile(r"[\uac00-\ud7af]")
 _KANA = re.compile(r"[\u3040-\u30ff]")
 _HAN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")

@@ -618,3 +618,28 @@ class TestAuditBahasa:
         assert msg
         assert "CJK" in msg or "Korea" in msg or "Jepang" in msg
         assert ai_meta.format_language_warning({"ok": True}) == ""
+
+
+class TestLatinOnlyOutput:
+    def test_aksara_asing_dihapus_dari_semua_field(self):
+        r = ai_meta.parse_metadata(json.dumps({
+            "titles": ["Fisika 物理 Momentum"],
+            "description": "Belajar 第一定律 hari ini",
+            "tags": ["fisika", "物理"],
+            "hashtags": ["#物理", "#fisika"],
+        }, ensure_ascii=False))
+        text = json.dumps(r, ensure_ascii=False)
+        assert not ai_meta._OFF_SCRIPT.search(text)
+        assert r["partial"] is True
+        assert r["titles"] == ["Fisika Momentum"]
+        assert r["tags"] == ["fisika"]
+        assert r["hashtags"] == ["#fisika"]
+
+    def test_prompt_memerintahkan_latin_only(self):
+        prompt = ai_meta.build_prompt({"title": "Momentum"}, {"lang": "id"})
+        body = prompt[1]["content"]
+        assert "only in the requested language using Latin" in body
+        assert "NEVER output Chinese" in body
+        assert "Japanese kanji" in body
+        assert "Korean Hangul" in body
+
