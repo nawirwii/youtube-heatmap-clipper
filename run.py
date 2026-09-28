@@ -195,7 +195,85 @@ def get_model_size(model):
         "large-v2": "2.9 GB",
         "large-v3": "2.9 GB"
     }
-    return sizes.get(model, "unknown size")
+    return sizes.get(normalise_model_name(model), "unknown size")
+
+
+def normalise_model_name(model):
+    """
+    Bersihkan nama model dari input user sebelum dipakai atau dicetak.
+
+    Nilai diambil dari <select> di UI, tapi endpoint /api/clip bisa juga
+    dipanggil lewat fetch atau curl, jadi nama bisa datang sebagai "Small",
+    " small ", atau "large_v3". Tanpa normalisasi, get_model_size mengembalikan
+    "unknown size" dan deteksi cache gagal padahal modelnya memang ada.
+    """
+    nama = str(model or "").strip().lower().replace("_", "-")
+    if not nama:
+        return "small"
+    if nama in ("tiny", "base", "small", "medium"):
+        return nama
+    if nama in ("large", "large-v1", "large-v2", "large-v3", "largev3"):
+        return "large-v3" if nama in ("large", "largev3") else nama
+    return nama
+
+
+def whisper_model_cached(model):
+    """
+    True kalau model Faster-Whisper untuk `model` sudah ada di cache lokal.
+
+    Versi lama cuma `os.listdir(HF_HOME)` lalu cari teks "faster-whisper-small"
+    di nama folder. Itu selalu gagal, karena faster-whisper (lewat huggingface_hub)
+    menyimpan model DI DALAM subfolder "hub" dengan nama repo:
+
+        HF_HOME/hub/models--Systran--faster-whisper-small
+
+    Jadi `listdir(HF_HOME)` cuma melihat satu entri bernama "hub" dan tidak
+    pernah menemukan modelnya. Gejalanya: user selalu diberi tahu "~466 MB
+    akan diunduh" padahal modelnya sudah ada di disk, dan tidak pernah tahu
+    bahwa model sebenarnya sedang dipakai.
+
+    Sekarang keduanya dicek: lokasi standar (HF_HOME atau ~/.cache/huggingface)
+    dan subfolder "hub" di dalamnya, plus nama repo bergaya huggingface_hub.
+    """
+    nama = (model or WHISPER_MODEL or "small").strip().lower()
+    if not nama:
+        return False
+    nama = normalise_model_name(nama)
+
+    # "large-v3" -> "large-v3"; nama repo huggingface untuk whisper X adalah
+    # "faster-whisper-large-v3" (tanpa pemisah tambahan).
+    repo = f"faster-whisper-{nama}"
+
+    roots = []
+    hf_home = os.environ.get("HF_HOME")
+    if hf_home:
+        roots.append(hf_home)
+    # faster-whisper juga memakai HUGGINGFACE_HUB_CACHE kalau diisi.
+    hub_cache = os.environ.get("HUGGINGFACE_HUB_CACHE")
+    if hub_cache:
+        roots.append(hub_cache)
+    roots.append(os.path.join(os.path.expanduser("~"), ".cache", "huggingface"))
+
+    seen = set()
+    for root in roots:
+        # Cek root-nya sendiri DAN subfolder "hub" di dalamnya.
+        for base in (root, os.path.join(root, "hub")):
+            base = os.path.normpath(base)
+            if base in seen:
+                continue
+            seen.add(base)
+            try:
+                entries = [e.lower() for e in os.listdir(base)]
+            except OSError:
+                continue
+            if not entries:
+                continue
+            # Cocokkan nama repo (mis. "models--systran--faster-whisper-small")
+            # ATAU folder gaya lama ("faster-whisper-small").
+            if any(repo in e for e in entries):
+                return True
+
+    return False
 
 
 def cek_dependensi(install_whisper=False, fatal=True):
@@ -222,24 +300,15 @@ def cek_dependensi(install_whisper=False, fatal=True):
             import faster_whisper
             print(f"✅ Faster-Whisper package installed.")
             
-            # Check if selected model is cached
-            cache_dir = os.environ.get("HF_HOME") or os.path.expanduser("~/.cache/huggingface")
-            model_name = f"faster-whisper-{WHISPER_MODEL}"
-            
-            model_cached = False
-            if os.path.exists(cache_dir):
-                try:
-                    cached_items = os.listdir(cache_dir)
-                    model_cached = any(model_name in item.lower() for item in cached_items)
-                except Exception:
-                    pass
-            
+            # Cek apakah model yang dipilih sudah ada di cache lokal.
+            model_cached = whisper_model_cached(WHISPER_MODEL)
+
             if model_cached:
                 print(f"✅ Model '{WHISPER_MODEL}' already cached and ready.\n")
             else:
                 print(f"⚠️  Model '{WHISPER_MODEL}' not found in cache.")
                 print(f"   📥 Will auto-download ~{get_model_size(WHISPER_MODEL)} on first transcribe.")
-                print(f"   ⏱️  Download happens only once, then cached for future use.\n")
+                print("   ⏱️  Download happens only once, then cached for future use.\n")
                 
         except ImportError:
             if IS_FROZEN:
@@ -642,7 +711,10 @@ def get_whisper_model(name=None):
     """
     from faster_whisper import WhisperModel
 
-    nama = (name or WHISPER_MODEL or "small").strip()
+    # Normalisasi di satu tempat: nama yang dicetak, nama yang dicari di cache,
+    # dan nama yang diteruskan ke WhisperModel harus sama. Kalau tidak, log
+    # bisa menyebut satu model sementara model lain yang benar-benar dimuat.
+    nama = normalise_model_name(name or WHISPER_MODEL)
     kunci = nama.lower()
     model = _WHISPER_CACHE.get(kunci)
     if model is not None:

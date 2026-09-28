@@ -647,10 +647,35 @@ class TestLatinOnlyOutput:
         assert "fisika" in text
 
     def test_prompt_memerintahkan_latin_only(self):
-        prompt = ai_meta.build_prompt({"title": "Momentum"}, {"lang": "id"})
+        prompt = ai_meta.build_prompt({"title": "Momentum"}, {"lang": "id", "tone": "energetic"})
         body = prompt[1]["content"]
         assert "only in the requested language using Latin" in body
         assert "NEVER output Chinese" in body
         assert "Japanese kanji" in body
         assert "Korean Hangul" in body
+        assert "lively, enthusiastic" in body
+        assert "hook" in body.lower()
+
+    def test_code_dan_url_dibuang_dari_metadata(self):
+        raw = json.dumps({
+            "titles": ["Judul valid", "```python print('x')```"],
+            "hook": "Pelajari momentum dengan cara sederhana.",
+            "description": "Pembuka valid.\nimport numpy as np\nconst x = 1\n"
+                "https://example.com\nPenutup valid.",
+            "tags": ["momentum", "print('x')", "fisika"],
+            "hashtags": ["#momentum", "#print('x')"],
+        })
+        result = ai_meta.parse_metadata(raw, {"hashtags_in_description": False})
+        assert result["titles"] == ["Judul valid"]
+        assert result["description"] == "Pembuka valid.\nPenutup valid."
+        assert result["tags"] == ["momentum", "fisika"]
+        assert result["hashtags"] == ["#momentum"]
+        assert result["hook"] == "Pelajari momentum dengan cara sederhana."
+
+    def test_fence_code_sebelum_json_tidak_mengalahkan_json(self):
+        raw = '```python\nprint("bukan metadata")\n```\n' + json.dumps({
+            "titles": ["Judul valid"], "description": "Isi valid", "tags": ["valid"]
+        })
+        result = ai_meta.parse_metadata(raw, {"hashtags_in_description": False})
+        assert result["titles"] == ["Judul valid"]
 

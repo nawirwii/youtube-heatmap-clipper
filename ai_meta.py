@@ -35,6 +35,12 @@ MAX_TRANSLIT_LEN = 480
 # tidak menambah jangkauan, cuma membuat deskripsi berantakan.
 MAX_HASHTAGS = 15
 MAX_HASHTAG_LEN = 60
+_TONE_GUIDANCE = {
+    "informative": "clear, factual, structured, and direct; explain the key point without hype",
+    "casual": "friendly, relaxed, natural, and conversational; use simple everyday wording",
+    "energetic": "lively, enthusiastic, punchy, and motivating; keep claims grounded in the video",
+    "educational": "teacher-like, easy to follow, explanatory, and useful for a learner",
+}
 
 # Batas yang dipaksakan YouTube untuk deskripsi. MAX_DESC_CHARS sengaja lebih
 # kecil supaya masih ada ruang untuk baris hashtag diBELAKANG deskripsi.
@@ -150,14 +156,16 @@ def build_prompt(context, options=None):
     user_note = str(options.get("note") or "").strip()[:MAX_CONTEXT_CHARS]
     lang = "Indonesian" if options.get("lang") == "id" else "English"
     n_titles = max(1, min(5, int(options.get("n_titles") or 3)))
-    tone = str(options.get("tone") or "informative").strip()[:40]
+    tone = str(options.get("tone") or "informative").strip().lower()[:40]
+    tone_guidance = _TONE_GUIDANCE.get(tone, _TONE_GUIDANCE["informative"])
+    include_hook = options.get("include_hook", True) is not False
 
     lines = [
         "You are a YouTube metadata writer. Read the video info and reply with "
         "ONE JSON object and nothing else. No markdown fence, no commentary.",
         "",
         f"Output language: {lang}.",
-        f"Writing tone: {tone}.",
+        f"Writing tone: {tone}. Style behavior: {tone_guidance}.",
         "STRICT SCRIPT RULE: write only in the requested language using Latin "
         "letters (A-Z), digits, normal spaces, and ordinary punctuation.",
         "NEVER output Chinese, Mandarin, Han/CJK characters, Japanese kana, "
@@ -166,8 +174,8 @@ def build_prompt(context, options=None):
         "simple Latin alternative or omit it. Do not translate into Chinese.",
         "",
         "Required JSON shape:",
-        '{"titles": ["..."], "description": "...", "tags": ["..."], '
-        '"hashtags": ["#..."]}',
+        '{"titles": ["..."], "hook": "...", "description": "...", '
+        '"tags": ["..."], "hashtags": ["#..."]}',
         "",
         "Rules:",
         f"- titles: exactly {n_titles} options, each under 100 characters, "
@@ -175,6 +183,12 @@ def build_prompt(context, options=None):
         "- description: 2-4 short paragraphs plus 3-5 short bullet points, "
         f"under {MAX_DESC_CHARS} characters, plain text only, in {lang}. "
         "Do NOT write any hashtag in the description; it is added separately.",
+        "- hook: one relevant opening sentence based on the actual video topic; "
+        "no fake claims, generic clickbait, or code. "
+        + ("Include it." if include_hook else "Return an empty string."),
+        "- Never put source code, programming syntax, HTML/XML, JSON, markdown "
+        "fences, URLs, internal reasoning, or prompt notes in metadata. Return "
+        "finished viewer-facing copy only.",
         f"- tags: between 8 and {MAX_TAGS} lowercase tags, no '#' character, "
         "no duplicates, mix broad and specific search terms.",
         f"- hashtags: between 3 and {MAX_HASHTAGS} items, each starting with '#', "
@@ -403,12 +417,14 @@ def _extract_text(raw):
 # --------------------------------------------------------------------------
 
 def strip_fences(text):
-    """Buang pembungkus ```json ... ``` dan ambil isi di dalamnya."""
+    """Buang fence markdown tanpa memilih fence kode yang salah."""
     s = (text or "").strip()
-    fence = re.search(r"```(?:json|JSON)?\s*(.+?)\s*```", s, re.S)
-    if fence:
-        s = fence.group(1).strip()
-    return s
+    fences = list(re.finditer(r"```(?:json|JSON)?\s*(.+?)\s*```", s, re.S))
+    for fence in fences:
+        candidate = fence.group(1).strip()
+        if candidate.startswith("{") or candidate.startswith("["):
+            return candidate
+    return re.sub(r"```(?:json|JSON)?\s*|\s*```", "", s, flags=re.I)
 
 
 def _balanced_object(text, start):
@@ -467,6 +483,7 @@ def parse_metadata(text, options=None):
     data = _remove_forbidden_scripts(data)
 
     titles = _clean_titles(data.get("titles") or data.get("title"))
+    hook = _clean_hook(data.get("hook") or data.get("opening"))
     description = _clean_desc(data.get("description") or data.get("desc"))
     tags = _clean_tags(data.get("tags") or data.get("keywords"))
     hashtags = _clean_hashtags(data.get("hashtags") or data.get("hashtag"), tags)
@@ -485,6 +502,7 @@ def parse_metadata(text, options=None):
     # talkatif tapi lengkap tetap dihitung utuh.
     return {
         "titles": titles,
+        "hook": hook,
         "description": description,
         "tags": tags,
         "hashtags": hashtags,
@@ -664,12 +682,24 @@ def _clean_titles(value):
             t = t[: MAX_TITLE_LEN - 1].rstrip() + "\u2026"
         if not t:
             continue
+        if _looks_like_non_copy(t):
+            continue
         key = t.lower()
         if key in seen:
             continue
         seen.add(key)
         out.append(t)
     return out
+
+
+def _clean_hook(value):
+    """Satu kalimat pembuka relevan; buang code, URL, dan markup."""
+    if not isinstance(value, str):
+        return ""
+    hook = _clean_desc(value).replace("\n", " ").strip()
+    if _CODE_LINE.search(hook) or _URL.search(hook):
+        return ""
+    return hook[:240].strip()
 
 
 def _clean_desc(value):
@@ -681,6 +711,18 @@ def _clean_desc(value):
     # whitespace dirapikan. Kalau dibalik, "\n" jadi spasi dan paragraf hilang.
     d = d.replace("\\n", "\n").replace("\\t", " ").replace("\\r", "")
     d = _STRIP_JSON_NOISE.sub(" ", d)
+    cleaned = []
+    for line in d.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            cleaned.append("")
+            continue
+        if _CODE_LINE.search(stripped) or _URL.search(stripped):
+            continue
+        if _JSON_LINE.match(stripped) and (":" in stripped or stripped in ("{", "}")):
+            continue
+        cleaned.append(line)
+    d = "\n".join(cleaned)
     d = re.sub(r"[ \t]+", " ", d)
     d = re.sub(r" ?\n ?", "\n", d)
     d = re.sub(r"\n{3,}", "\n\n", d).strip()
@@ -707,6 +749,8 @@ def _clean_tags(value):
         t = re.sub(r"\\[nrt]", " ", t)
         t = re.sub(r"\s+", " ", t).strip(" .,:;|")
         if not t or len(t) > MAX_TRANSLIT_LEN:
+            continue
+        if _looks_like_non_copy(t):
             continue
         # Buang tag yang cuma noise (###, ---, dll). Aksara non-Latin
         # SENGAJA TIDAK dibuang di sini: tag Mandarin dari model adalah bukti
@@ -763,6 +807,8 @@ def _clean_hashtags(value, fallback_tags=None):
             )
             t = t.strip(" .,:;|#*_")
             if not t or len(t) > MAX_HASHTAG_LEN:
+                continue
+            if _looks_like_non_copy(t):
                 continue
             # Sama seperti tag: aksara non-Latin dibiarkan lewat supaya
             # guard bahasa bisa melaporkannya.
@@ -849,6 +895,22 @@ _FORBIDDEN_WORDS = re.compile(
 )
 # Karakter kontrol dibuang; newline/tab tetap dipertahankan untuk deskripsi.
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_CODE_LINE = re.compile(
+    r"^\s*(?:[#@$]?import\b|from\s+\S+\s+import\b|def\s+\w+\s*\(|"
+    r"class\s+\w+\s*[:(]|(?:const|let|var)\s+\w+\s*=|return\b|"
+    r"<\/?[a-z][^>]*>|[{}]\s*$|```|(?:SELECT|INSERT|UPDATE|DELETE)\s+.+)", flags=re.I
+)
+_JSON_LINE = re.compile(r"^\s*[\[\]{\"]?(?:\"?\w+\"?\s*:|[\[\]{\}])")
+_URL = re.compile(r"https?://\S+|www\.\S+", flags=re.I)
+
+
+def _looks_like_non_copy(text):
+    """True untuk potongan code/markup/URL, bukan kata metadata."""
+    value = str(text or "").strip()
+    return bool(_CODE_LINE.search(value) or _URL.search(value) or re.search(
+    r"[<>]|=>|\b(?:function|print|console|script|html|body)\b", value,
+        flags=re.I,
+    ))
 
 
 def _remove_forbidden_scripts(value):

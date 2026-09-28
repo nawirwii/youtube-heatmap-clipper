@@ -233,6 +233,10 @@
             <div class="help" data-i18n="help.ai_tone">Nada bahasa judul &amp; deskripsi.</div>
           </div>
           <div class="row">
+            <label class="label" data-i18n="label.ai_hook">Hook relevan</label>
+            <label class="checkLabel"><input id="aiHook" type="checkbox" checked /> <span data-i18n="help.ai_hook">Buat kalimat pembuka yang relevan dengan topik video.</span></label>
+          </div>
+          <div class="row">
             <label class="label" data-i18n="label.ai_timeout">Timeout (detik)</label>
             <input id="aiTimeout" class="input" type="number" min="30" max="1800" step="30" value="600" />
             <div class="help" data-i18n="help.ai_timeout">Model lokal di CPU bisa lambat. Naikkan kalau sering kehabisan waktu.</div>
@@ -267,6 +271,13 @@
               <button class="btn ghost smallBtn" type="button" data-copy="aiTitles" data-i18n="btn.copy">Copy</button>
             </div>
             <div id="aiTitles" class="aiTitles"></div>
+          </div>
+          <div class="aiField">
+            <div class="aiFieldHead">
+              <div class="label" data-i18n="label.ai_hook">Hook</div>
+              <button class="btn ghost smallBtn" type="button" data-copy="aiHookText" data-i18n="btn.copy">Copy</button>
+            </div>
+            <textarea id="aiHookText" class="input aiTextarea" rows="2"></textarea>
           </div>
           <div class="aiField">
             <div class="aiFieldHead">

@@ -82,11 +82,13 @@ const I18N = {
     "label.ai_api_key": "API key (opsional)",
     "help.ai_api_key": "Cuma diisi kalau server lokalmu minta kunci. Disimpan di browser ini saja.",
     "label.ai_tone": "Gaya tulisan",
+    "help.ai_tone": "Informatif, santai, energetik, atau edukatif — diterapkan ke judul, hook, dan deskripsi.",
+    "label.ai_hook": "Hook relevan",
+    "help.ai_hook": "Buat kalimat pembuka yang relevan dengan topik video.",
     "opt.ai_tone.informative": "Informatif",
     "opt.ai_tone.casual": "Santai",
     "opt.ai_tone.energetic": "Energetik",
     "opt.ai_tone.educational": "Edukatif",
-    "help.ai_tone": "Nada bahasa judul dan deskripsi.",
     "label.ai_timeout": "Timeout (detik)",
     "help.ai_timeout": "Model lokal di CPU bisa lambat. Naikkan kalau sering kehabisan waktu.",
     "label.ai_note": "Instruksi tambahan (opsional)",
@@ -216,11 +218,13 @@ const I18N = {
     "label.ai_api_key": "API key (optional)",
     "help.ai_api_key": "Only needed if your local server requires one. Stored in this browser only.",
     "label.ai_tone": "Writing tone",
+    "help.ai_tone": "Informative, casual, energetic, or educational — applied to titles, hook, and description.",
+    "label.ai_hook": "Relevant hook",
+    "help.ai_hook": "Create an opening sentence relevant to the video topic.",
     "opt.ai_tone.informative": "Informative",
     "opt.ai_tone.casual": "Casual",
     "opt.ai_tone.energetic": "Energetic",
     "opt.ai_tone.educational": "Educational",
-    "help.ai_tone": "The language style used for the title and description.",
     "label.ai_timeout": "Timeout (seconds)",
     "help.ai_timeout": "Local models on CPU can be slow. Raise this if requests keep timing out.",
     "label.ai_note": "Extra instruction (optional)",
@@ -479,6 +483,7 @@ function aiCollectSettings() {
     model: $("aiModel").value.trim(),
     api_key: $("aiApiKey").value,
     tone: $("aiTone").value,
+    include_hook: $("aiHook").checked,
     timeout: Number($("aiTimeout").value) || 600,
     note: $("aiNote").value.trim(),
     transcript: aiTranscript || "",
@@ -556,6 +561,7 @@ async function aiRestoreConfigFromServer() {
     if (c.base_url) $("aiBaseUrl").value = c.base_url;
     if (c.model) $("aiModel").value = c.model;
     if (c.tone) $("aiTone").value = c.tone;
+    if (typeof c.include_hook === "boolean") $("aiHook").checked = c.include_hook;
     if (c.timeout) $("aiTimeout").value = c.timeout;
     if (c.note) $("aiNote").value = c.note;
     if (typeof c.transcript === "string" && c.transcript) {
@@ -587,6 +593,7 @@ function aiRestoreSettings() {
   $("aiModel").value = s.model || "";
   $("aiApiKey").value = s.api_key || "";
   $("aiNote").value = s.note || "";
+  $("aiHook").checked = s.include_hook !== false;
   $("aiTimeout").value = s.timeout || 600;
   if (s.tone) $("aiTone").value = s.tone;
 }
@@ -655,6 +662,7 @@ function aiCollectPayload() {
       lang: currentLang,
       tone: s.tone,
       note: s.note,
+      include_hook: s.include_hook,
       timeout: s.timeout,
       n_titles: 3,
       hashtags_in_description: s.options.hashtags_in_description !== false,
@@ -675,6 +683,7 @@ function aiFillModelList(models) {
 function aiRenderResult(meta) {
   aiMetaData = {
     titles: Array.isArray(meta.titles) ? meta.titles : [],
+    hook: meta.hook || "",
     description: meta.description || "",
     tags: Array.isArray(meta.tags) ? meta.tags : [],
     hashtags: Array.isArray(meta.hashtags)
@@ -706,6 +715,7 @@ function aiRenderResult(meta) {
     box.innerHTML = '<div class="aiEmpty">' + t("js.ai.desc_empty") + "</div>";
   }
 
+  $("aiHookText").value = aiMetaData.hook || "";
   $("aiDescription").value = aiMetaData.description || "";
 
   const tagBox = $("aiTags");
@@ -753,7 +763,7 @@ function aiRenderResult(meta) {
 }
 
 function aiRenderIdle() {
-  aiMetaData = { titles: [], description: "", tags: [], hashtags: [] };
+  aiMetaData = { titles: [], hook: "", description: "", tags: [], hashtags: [] };
   $("aiTitles").innerHTML = "";
   $("aiTags").innerHTML = "";
   $("aiHashtags").innerHTML = "";

@@ -585,6 +585,7 @@ def _ai_settings(payload):
     stored_options = {
         "tone": stored.get("tone"),
         "timeout": stored.get("timeout"),
+        "include_hook": stored.get("include_hook", True),
         "n_titles": stored.get("n_titles"),
         "note": stored.get("note"),
         "hashtags_in_description": stored.get("hashtags_in_description", True),
@@ -764,16 +765,52 @@ def serve_clip(job_id, filename):
     return send_from_directory(job_dir, filename, conditional=True)
 
 
+def _clip_ready(path):
+    """
+    True kalau file clip sudah selesai ditulis dan layak dikirim.
+
+    ffmpeg menulis output langsung ke nama file akhir. Kalau unduhan diminta
+    di detik yang sama saat file masih tumbuh, browser bisa menerima file
+    terpotong: user mengunduh video yang tidak bisa diputar, atau 0 byte.
+    """
+    try:
+        if not os.path.isfile(path):
+            return False
+        # harus cukup besar untuk header container + payload
+        if os.path.getsize(path) < 1024:
+            return False
+        return core.file_video_valid(path)
+    except OSError:
+        return False
+
+
 @app.get("/download/<job_id>/<path:filename>")
 def download_clip(job_id, filename):
-    """Route yang memang untuk diunduh."""
+    """
+    Route unduhan. Memo: nama file di sini sudah tervalidasi oleh job_dir_for
+    untuk folder, dan filename dicek agar tidak keluar dari job_dir.
+    """
     job_dir = job_dir_for(job_id)
     path = os.path.join(job_dir, filename)
 
-    if not os.path.isfile(path):
-        return jsonify({"ok": False, "error": "Clip tidak ditemukan."}), 404
+    # Tolak path yang mencoba keluar dari folder job (mis. "../..").
+    root = os.path.abspath(job_dir)
+    full = os.path.abspath(path)
+    if os.path.commonpath([root, full]) != root:
+        return jsonify({"ok": False, "error": "Path tidak valid."}), 400
 
-    return send_from_directory(job_dir, filename, as_attachment=True)
+    if not _clip_ready(full):
+        return jsonify({
+            "ok": False,
+            "error": "Clip belum siap atau file tidak valid. Coba lagi sebentar.",
+        }), 404
+
+    # send_from_directory sudah memasang Content-Disposition: attachment.
+    # Content-Length ditambahkan eksplisit supaya klien yang bergantung pada
+    # panjang file tidak menebak-nebak.
+    response = send_from_directory(job_dir, filename, as_attachment=True)
+    response.headers["Content-Length"] = str(os.path.getsize(full))
+    return response
 
 
 def find_free_port(host, preferred, attempts=20):
