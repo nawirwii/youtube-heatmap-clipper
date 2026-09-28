@@ -635,6 +635,17 @@ class TestLatinOnlyOutput:
         assert r["tags"] == ["fisika"]
         assert r["hashtags"] == ["#fisika"]
 
+    def test_kata_bahasa_terlarang_dihapus(self):
+        r = ai_meta.parse_metadata(json.dumps({
+            "titles": ["Belajar Mandarin dan Chinese"],
+            "description": "Topik China dan Cina Tiongkok.",
+            "tags": ["mandarin", "chinese", "fisika"],
+        }))
+        text = json.dumps(r, ensure_ascii=False).lower()
+        for word in ("mandarin", "chinese", "china", "cina", "tiongkok"):
+            assert word not in text
+        assert "fisika" in text
+
     def test_prompt_memerintahkan_latin_only(self):
         prompt = ai_meta.build_prompt({"title": "Momentum"}, {"lang": "id"})
         body = prompt[1]["content"]

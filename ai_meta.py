@@ -844,6 +844,9 @@ _OFF_SCRIPT = re.compile(
     r"[\u3005\u3007\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
     r"\u3040-\u30ff\uac00-\ud7af]"
 )
+_FORBIDDEN_WORDS = re.compile(
+    r"\b(?:mandarin|chinese|china|cina|tiongkok)\b", flags=re.IGNORECASE
+)
 # Karakter kontrol dibuang; newline/tab tetap dipertahankan untuk deskripsi.
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
@@ -857,6 +860,7 @@ def _remove_forbidden_scripts(value):
     normalisasi berikutnya menandainya sebagai field kosong.
     """
     if isinstance(value, str):
+        value = _FORBIDDEN_WORDS.sub("", value)
         value = _OFF_SCRIPT.sub("", value)
         return _CONTROL_CHARS.sub("", value)
     if isinstance(value, list):
