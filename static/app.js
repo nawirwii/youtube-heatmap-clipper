@@ -484,7 +484,7 @@ function aiCollectSettings() {
     api_key: $("aiApiKey").value,
     tone: $("aiTone").value,
     include_hook: $("aiHook").checked,
-    timeout: Number($("aiTimeout").value) || 600,
+    timeout: Number($("aiTimeout").value) || 1800,
     note: $("aiNote").value.trim(),
     transcript: aiTranscript || "",
     options: {
@@ -1250,7 +1250,9 @@ async function pollJob(jobId) {
     if (!data || !data.ok) throw new Error("Job not found");
     renderProgress(data.job);
     if (data.job.status === "done" || data.job.status === "error") return;
-    if (Date.now() - started > 1000 * 60 * 30) throw new Error("Timeout");
+    // Match the server-side maximum timeout and avoid aborting a legitimate
+    // slow CPU inference before the HTTP request has finished.
+    if (Date.now() - started > 1000 * 60 * 60) throw new Error("Timeout");
     await new Promise((r) => setTimeout(r, 1500));
   }
 }

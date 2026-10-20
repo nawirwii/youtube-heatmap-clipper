@@ -20,9 +20,12 @@ import urllib.request
 
 # Model lokal di CPU lambat. Batas bawah 120 detik supaya error cepat tetap
 # terasa, tapi 900 detik memberi ruang untuk model 1-3B.
-DEFAULT_TIMEOUT = 600.0
+# Local LLM inference on CPU can legitimately take many minutes. Keep the
+# request timeout generous so a slow-but-working model is not reported as a
+# failure while it is still generating.
+DEFAULT_TIMEOUT = 1800.0
 MIN_TIMEOUT = 30.0
-MAX_TIMEOUT = 1800.0
+MAX_TIMEOUT = 3600.0
 
 # Batas input supaya prompt tidak meledakkan RAM mesin kecil.
 MAX_CONTEXT_CHARS = 6000
