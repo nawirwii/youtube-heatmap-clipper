@@ -269,7 +269,14 @@ def run_job(job_id, payload):
                 return
             stage = data.get("stage") or ""
             clip_index = safe_int(data.get("clip_index"), 0) or 0
-            set_job(job_id, stage=stage, stage_at=now_ms(), stage_clip=clip_index)
+            patch = {"stage": stage, "stage_at": now_ms(), "stage_clip": clip_index}
+            # Keep the real ffmpeg/Whisper failure visible instead of reducing
+            # every failed clip to the misleading generic "running" state.
+            if stage == "error":
+                detail = str(data.get("detail") or "Gagal memproses clip")
+                patch["stage_error"] = detail
+                add_log(job_id, f"Clip {clip_index}: {detail}")
+            set_job(job_id, **patch)
 
         # Unduh video-nya SEKALI per job, lalu semua clip dipotong dari file
         # yang sama. Selain jauh lebih cepat untuk max_clips besar, ini juga

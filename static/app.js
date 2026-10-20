@@ -1100,7 +1100,8 @@ function renderProgress(job) {
   const done = Number(job.done || 0);
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   const stage = stageLabel(job.stage || "");
-  meta.textContent = `${job.status} • ${(job.status_text || "").trim()}${stage ? " • " + stage : ""}`.trim();
+  const detail = job.stage_error || "";
+  meta.textContent = `${job.status} • ${(job.status_text || "").trim()}${stage ? " • " + stage : ""}${detail ? " • " + detail : ""}`.trim();
 
   const bar = document.createElement("div");
   bar.innerHTML = `<div class="bar"><div style="width:${pct}%"></div></div>`;
@@ -1117,7 +1118,7 @@ function renderProgress(job) {
   if (job.status === "error") {
     const err = document.createElement("div");
     err.className = "small";
-    err.textContent = job.error || "error";
+    err.textContent = job.error || job.stage_error || "error";
     root.appendChild(err);
   }
 

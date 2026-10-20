@@ -1162,6 +1162,12 @@ def proses_satu_clip(
         return True
 
     except subprocess.CalledProcessError as e:
+        if callable(event_hook):
+            try:
+                event_hook("stage", {"stage": "error", "clip_index": index,
+                                      "detail": (e.stderr or e.stdout or "ffmpeg gagal")[-1200:]})
+            except Exception:
+                pass
         # Cleanup temp files
         for f in [temp_file, cropped_file, subtitle_file]:
             if os.path.exists(f):
